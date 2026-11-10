@@ -79,7 +79,7 @@ export function bestSuggestion(value: string, texts: string[]): string | null {
     for (const p of parts.slice(1)) if (text.toLowerCase().includes(p) || (REGION_CODES[p] && w.has(REGION_CODES[p]!))) score++;
     if (!best || score > best.score) best = { text, score };
   }
-  // "Concord, Ontario, Canada" must not become Concord, California: with a region or country named,
+  // "Guelph, Ontario, Canada" must not become Guelph, California: with a region or country named,
   // a suggestion that matches neither is not the place.
   if (best && parts.length > 1 && best.score === 0) return null;
   return best?.text ?? null;
