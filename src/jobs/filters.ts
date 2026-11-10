@@ -47,7 +47,11 @@ export function locationMatch(job: Pick<Job, "locations" | "remote">, profile: P
       best = { weight: place.weight, label: place.match };
     }
   }
-  if (job.remote && remote && (!best || remoteWeight > best.weight)) {
+  // When the places say which remote ("Remote (US)"), it counts only if that place was not excluded.
+  // When none do, the board's own remote flag decides.
+  const remoteTexts = job.locations.filter((loc) => /\bremote\b/i.test(loc));
+  const remoteUsable = remoteTexts.length === 0 ? job.remote : usable.some((loc) => /\bremote\b/i.test(loc));
+  if (remoteUsable && remote && (!best || remoteWeight > best.weight)) {
     best = { weight: remoteWeight, label: "remote" };
   }
   if (best) return best;

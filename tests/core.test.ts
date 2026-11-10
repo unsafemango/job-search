@@ -97,6 +97,12 @@ describe("filters", () => {
     expect(locationMatch(job({ locations: ["Calgary, Canada"] }), profile)?.label).toBe("Canada");
     expect(locationMatch(job({ locations: ["Remote"], remote: true }), profile)?.label).toBe("remote");
     expect(locationMatch(job({ locations: ["Remote - US"], remote: true }), profile)).toBeNull();
+    // An excluded remote place does not make the job remote for you.
+    expect(locationMatch(job({ locations: ["New York, NY (HQ)", "Remote (US)"], remote: true }), profile)).toBeNull();
+    // A remote place that is not excluded still counts (remote outweighs Canada in this profile).
+    expect(locationMatch(job({ locations: ["Remote (US)", "Remote - Canada"], remote: true }), profile)?.label).toBe("remote");
+    // With no place naming remote, the board's flag decides.
+    expect(locationMatch(job({ locations: ["Berlin"], remote: true }), profile)?.label).toBe("remote");
     expect(locationMatch(job({ locations: [] }), profile)?.label).toBe("location not stated");
   });
 });
