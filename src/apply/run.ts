@@ -34,12 +34,23 @@ export type ApplyOptions = {
   map?: (job: StoredJob, fields: FormField[], profile: Profile, memory: Remembered[], cover?: CoverAnswer) => Promise<MappedForm>;
   /** Swapped out in tests: the documents for one job. */
   prepare?: (job: StoredJob, cover: boolean) => Promise<JobDocuments>;
+  /** Called once a job's application is confirmed sent, to delete what was made for it. */
+  cleanup?: (job: StoredJob) => void;
+  /** Nobody is watching the window: a robot check cannot be passed, so the form is left for you instead. */
+  headless?: boolean;
   log?: (line: string) => void;
   sleep?: (ms: number) => Promise<void>;
 };
 
 /** What a job's form gets: a resume (tailored, or your own), and a cover letter if one was written. */
-export type JobDocuments = { resume: string | null; coverLetter: string | null; coverText: string | null };
+export type JobDocuments = {
+  resume: string | null;
+  coverLetter: string | null;
+  coverText: string | null;
+  /** The names employers see on the uploads; First_Last_Resume.pdf and First_Last_Cover_Letter.pdf when not given. */
+  resumeName?: string;
+  coverName?: string;
+};
 
 export type JobOutcome = { job: StoredJob; state: ApplicationState; detail: string; fields: FieldResult[]; leftOpen: boolean };
 
@@ -154,22 +165,22 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         continue;
       }
 
-      // A cover letter is written when the form requires one, or the posting asks for one.
+      // A cover letter goes in whenever the form has a box for one, even an optional one. A job that already
+      // has its own (from your Weekly Rhythm) is only attached; otherwise one is written, and checked.
       const coverField = dump.fields.find(isCoverField);
-      const needCover = !!coverField && (coverField.required || /cover letter/i.test(job.description));
-      const docs = await prepare(job, needCover);
+      const docs = await prepare(job, !!coverField);
       const cover: CoverAnswer | undefined =
-        coverField && needCover && docs.coverLetter
+        coverField && docs.coverLetter
           ? { id: coverField.id, values: coverField.kind === "file" ? ["cover_letter"] : docs.coverText ? [docs.coverText] : [] }
           : undefined;
       const uploads: Uploads = {
-        resume: { path: docs.resume ?? resume, name: resumeName(profile) },
-        ...(docs.coverLetter ? { cover: { path: docs.coverLetter, name: coverLetterName(profile) } } : {}),
+        resume: { path: docs.resume ?? resume, name: docs.resumeName ?? resumeName(profile) },
+        ...(docs.coverLetter ? { cover: { path: docs.coverLetter, name: docs.coverName ?? coverLetterName(profile) } } : {}),
       };
 
       const questions = dump.fields.filter(isQuestion).map((f) => f.label);
       const mapped = await map(job, dump.fields, profile, store.recall(questions), cover);
-      if (needCover && !cover) mapped.problems.push("the form needs a cover letter, and none could be written that your facts support");
+      if (coverField?.required && !cover) mapped.problems.push("the form needs a cover letter, and none could be written that your facts support");
       if (mapped.verdict === "skip") {
         await page.close();
         record({ state: "skipped", detail: mapped.reason, fields: [], leftOpen: false });
@@ -179,7 +190,7 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       const problems = [...mapped.problems];
       for (const r of results) if (!r.ok) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
       for (const r of results) if (r.required && !r.shows && !r.wanted) problems.push(`"${r.label}" is required and empty`);
-      const unique = [...new Set(problems)];
+      const unique = [...new Set(problems)].map((p) => (p.length > 240 ? `${p.slice(0, 237)}...` : p));
 
       if (unique.length) {
         record({ state: "left_for_you", detail: unique.slice(0, 6).join("; "), fields: results, leftOpen: true });
@@ -196,11 +207,18 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       if (lastSent && gap > 0) await sleep(gap);
       const sent = await submitForm(page, dump.submit);
       lastSent = Date.now();
+      // With nobody at the window a robot check cannot be passed; it was not sent, so it stays open to try again.
+      if (opts.headless && sent.state === "needs_you" && /robot check/i.test(sent.detail)) {
+        await page.close();
+        record({ state: "left_for_you", detail: `${sent.detail}. Apply yourself at ${job.url}`, fields: results, leftOpen: false });
+        continue;
+      }
       if (sent.state === "submitted") {
         store.setStatus(job.id, "applied", "applied by the tool");
         await page.close();
         // The resume and cover letter were made for this one application; it is sent, so they go.
         if (deleteDocuments(job.id)) log(`${job.id}  deleted its tailored resume and cover letter`);
+        opts.cleanup?.(job);
       }
       record({ state: sent.state, detail: sent.detail, fields: results, leftOpen: sent.state !== "submitted" });
     } catch (err) {

@@ -51,7 +51,7 @@
   "rating": {
     "provider": "claude-code",
     "command": "claude",
-    "model": "claude-opus-5-5",
+    "model": "claude-haiku-5-5",
     "effort": "low",
     "maxJobsPerRun": 25,
     "maxSpendPerRunUsd": 1
@@ -105,9 +105,10 @@
     }
   },
   "apply": {
-    "model": "claude-opus-5-5",
+    "model": "claude-haiku-5-5",
     "effort": "medium",
     "submitGapSeconds": 45,
-    "maxPerDay": 15
+    "maxPerDay": 10,
+    "writeModel": "claude-sonnet-5-5"
   }
 }

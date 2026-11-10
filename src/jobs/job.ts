@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Level } from "../profile/schema.js";
 
-export type SourceName = "greenhouse" | "lever" | "ashby" | "github" | "workday" | "csv";
+export type SourceName = "greenhouse" | "lever" | "ashby" | "github" | "workday" | "csv" | "rhythm";
 
 /** One posting, in the same shape whichever board it came from. */
 export type Job = {
@@ -26,12 +26,19 @@ export type Job = {
  * The form for a posting link on a board `apply` can fill (Greenhouse, Lever,
  * Ashby), or null.
  */
-export function applyUrlFor(url: string): string | null {
+export function applyUrlFor(url: string, company?: string): string | null {
   let u: URL;
   try {
     u = new URL(url);
   } catch {
     return null;
+  }
+  // A company's own careers page that embeds Greenhouse carries the posting id as gh_jid. The board is
+  // usually named after the company, so that is tried; a wrong guess just finds no form and is left for you.
+  const ghJid = u.searchParams.get("gh_jid");
+  if (ghJid && /^\d+$/.test(ghJid) && company && !/greenhouse\.io$/.test(u.hostname)) {
+    const board = company.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return board ? `https://job-boards.greenhouse.io/embed/job_app?for=${board}&token=${ghJid}` : null;
   }
   const parts = u.pathname.split("/").filter(Boolean);
   if (/(^|\.)greenhouse\.io$/.test(u.hostname)) {

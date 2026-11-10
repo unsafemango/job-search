@@ -66,6 +66,7 @@ npm run job -- apply <id>                    # fill one job's form and check it;
 npm run job -- apply --count 5 --submit      # fill and send your 5 best untried jobs
 npm run job -- applications [id]             # what happened, field by field
 npm run job -- tailor <id> --cover           # a resume and cover letter for one job (apply makes these itself)
+npm run job -- daily --submit --headless     # today's Weekly Rhythm jobs, applied to automatically (see /daily)
 npm run job -- referrals <id> --draft        # people you know there, and a message to send
 npm run job -- memory                        # answers apply reuses on later forms
 npm run job -- mark <id> applied --note "Referred by Sam"
@@ -108,16 +109,28 @@ In Claude Code, type `/inbox`. Claude searches your connected mail, read-only an
 
 Every score is stored with its four parts (title, skills or model fit, location, recency). Once you've sent at least 20 applications, with at least 5 positive replies and 5 without, `learn` compares the two groups and moves weight toward the parts that predicted a reply. Each weight can move at most 1.5x up or 0.5x down, and the four still sum to 100. `learn --save` writes them to your profile as `scoreWeights`, and the next `discover` rescores. Delete `scoreWeights` to go back to the defaults.
 
+### Daily automatic applying
+
+`daily` applies to the jobs a separate daily job-finder saves each morning (here, a Claude routine that posts 10 jobs, each with its own resume and cover letter PDFs, to a Weekly Rhythm page). The `/daily` skill, run by a scheduled task, does the whole thing:
+
+1. It fetches the day's jobs and drops any already ticked in the page.
+2. It downloads the resume and cover letter the finder already wrote for each job the app can fill, so no new ones are written.
+3. `daily` fills each form, checks every value, and sends only forms that checked out, up to `apply.maxPerDay`. A job on a board the app can't fill (Workday and most others) goes on your Needs you list with its link.
+4. If fewer than 10 can be filled, it looks for new jobs on your own boards and adds the best, with your own resume (and a written cover letter when the form has a box for one).
+5. It ticks each sent job in the page, deletes the PDFs it used, and reports what it sent and what needs you.
+
+With nobody at the window, a form that shows a robot check is left for you rather than sent. Run `daily` without `--submit` for a dry run. Everything is in `data/rhythm/`, which is git-ignored.
+
 ### Resumes and cover letters for each job
 
 Before filling a form, `apply` writes a new resume for that job, and a cover letter when the form requires one or the posting asks for one. You can also make them yourself with `tailor <id>`, or `tailor <id> --cover` for a cover letter too. They're written from `data/resume.json`, which holds your resume as data plus a `facts` list of true things that aren't on the resume. Copy `data/resume.example.json` to start. They're written in your voice, from `data/voice.md` if you have one.
 
 - **The resume** gets a headline with a role you can truthfully claim and the skills this job wants most, a short summary, skills grouped for the posting, and bullets reworded toward it. Roles that don't help are dropped, except your current one. It's at most two pages.
-- **The cover letter** is a few short, plain paragraphs: the role, then what you did that matches what the posting asks for most. It never mentions gaps.
+- **The cover letter** is a few short, plain paragraphs: the role, then what you did that matches what the posting asks for most. It never mentions gaps. One is written whenever the form has a box for it, even an optional one.
 - **Every line is checked in code.** Any number or named term (a tool, a company, a product) that isn't in your resume or facts gets sent back to Claude once with the list. Whatever still fails is dropped, and a cover letter with too little left isn't sent. A form that needs a cover letter then waits for you.
 - **`notes.md`** lists the posting's keywords used, the gaps (what the posting wants that your facts don't show, so you know not to claim it), and numbers that would make the resume stronger.
 
-They're uploaded as `First_Last_Resume.pdf` and `First_Last_Cover_Letter.pdf`, kept in `data/tailored/<id>/` (git-ignored), and **deleted once the application is sent**. To use your own resume file instead, run `apply --no-tailor`.
+Resumes and cover letters are written by `apply.writeModel` (Sonnet by default), and forms are filled by `apply.model` (Haiku by default), so the cheaper model does the simple work. They're uploaded as `First_Last_Resume.pdf` and `First_Last_Cover_Letter.pdf`, kept in `data/tailored/<id>/` (git-ignored), and **deleted once the application is sent**. To use your own resume file instead, run `apply --no-tailor`.
 
 ### Answer memory and referrals
 
@@ -238,6 +251,7 @@ src/
   db.ts           the SQLite store
   model/          the rating shape, the local Claude Code and API providers, pricing
   apply/          reading, mapping, filling and sending application forms
+  daily.ts        the daily run: today's jobs and their PDFs
   resume/         resume data, tailoring with a truth check, PDF rendering
   dashboard.ts    the local review page
   learn.ts        learned weights and reading replies

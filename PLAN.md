@@ -66,6 +66,7 @@ Useful with no browser automation and no model.
 - [x] Read every value back from the page before submitting
 - [x] A submission is "unconfirmed" until a confirmation page is seen; never sent twice
 - [x] Sign-ins, human checks and signatures are handed to you
+- [x] Daily automatic applying from a job-finder's list (`daily`, `/daily`), using the PDFs it wrote
 - [ ] Workday: accounts and forms with several pages
 - [ ] Weekly canary: fill a known form on each board without sending
 

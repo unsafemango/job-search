@@ -109,7 +109,10 @@ export const ProfileSchema = z.object({
   /** How `apply` fills forms. */
   apply: z
     .object({
-      model: z.string().min(1).default("claude-opus-5-5"),
+      /** Fills forms: reads a few questions and picks answers from your profile, so a small model does well. */
+      model: z.string().min(1).default("claude-haiku-5-5"),
+      /** Writes resumes and cover letters, where wording matters. */
+      writeModel: z.string().min(1).default("claude-sonnet-5-5"),
       effort: z.enum(["low", "medium", "high"]).default("medium"),
       /** Seconds to wait between two submissions. */
       submitGapSeconds: z.number().nonnegative().default(45),
@@ -134,7 +137,7 @@ export const ProfileSchema = z.object({
       provider: z.enum(["claude-code", "api"]).default("claude-code"),
       /** The Claude Code command, for the "claude-code" provider. */
       command: z.string().min(1).default("claude"),
-      model: z.string().min(1).default("claude-opus-5-5"),
+      model: z.string().min(1).default("claude-haiku-5-5"),
       effort: z.enum(["low", "medium", "high"]).default("low"),
       /** At most this many jobs are rated per run. */
       maxJobsPerRun: z.number().int().positive().default(25),

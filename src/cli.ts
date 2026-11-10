@@ -15,6 +15,7 @@ import { loadProfile } from "./profile/schema.js";
 import { rateJobs } from "./rate.js";
 import { openSession } from "./apply/browser.js";
 import { applyJobs } from "./apply/run.js";
+import { blobId, parseRhythm, planDaily, readJson, runDaily } from "./daily.js";
 import { prepareDocuments } from "./resume/documents.js";
 import { createInterface } from "node:readline/promises";
 import { CSV_COLUMNS, parseCsvJobs } from "./sources/csv.js";
@@ -369,6 +370,76 @@ program
       for (const m of all) console.log(`${m.question}  (used ${m.uses}x)\n    ${m.answer}\n`);
     }
     store.close();
+  });
+
+program
+  .command("daily [file]")
+  .description("Apply to today's jobs from your Weekly Rhythm, using the resume and cover letter it wrote for each (see /daily)")
+  .option("-n, --count <n>", "how many applications at most (default: apply.maxPerDay in your profile)")
+  .option("--submit", "send each form that filled cleanly (without it, nothing is sent)")
+  .option("--headless", "run without a visible window; a robot check is then left for you")
+  .option("--no-top-up", "do not add jobs from your own boards when the day's list has fewer fillable jobs")
+  .option("--no-discover", "do not look for new jobs on your own boards first")
+  .option("--plan", "only print which of the day's jobs can be filled and which PDFs are needed, as JSON")
+  .action(async (file: string | undefined, opts: { count?: string; submit?: boolean; headless?: boolean; topUp: boolean; discover: boolean; plan?: boolean }) => {
+    const profile = loadProfile(PATHS.profile);
+    const jobsFile = file ?? path.join(PATHS.rhythm, "jobs.json");
+    const filesDir = path.join(PATHS.rhythm, "files");
+    const count = opts.count === undefined ? profile.apply.maxPerDay : Number(opts.count);
+    if (!Number.isInteger(count) || count < 1) throw new Error(`--count must be a whole number above 0, not "${opts.count}".`);
+    const doc = existsSync(jobsFile) ? parseRhythm(readFileSync(jobsFile, "utf8")) : null;
+    if (!doc) console.log(`No jobs file at ${jobsFile}; only jobs from your own boards will be used.`);
+    const appliedIds = readJson<string[]>(path.join(PATHS.rhythm, "applied.json"), []);
+    const store = new Store(PATHS.db);
+    let session: Awaited<ReturnType<typeof openSession>> | null = null;
+    try {
+      if (opts.plan) {
+        const plan = doc ? planDaily(store, doc, appliedIds) : { date: "", fillable: [], skipped: [] };
+        const out = {
+          date: plan.date,
+          fillable: plan.fillable.slice(0, count).map((e) => ({ id: e.item.id, company: e.item.company, role: e.item.role, resumeBlob: blobId(e.item.resumePdf), coverBlob: blobId(e.item.coverPdf) })),
+          skipped: plan.skipped.map((s) => ({ id: s.item.id, company: s.item.company, reason: s.reason })),
+        };
+        console.log(JSON.stringify(out, null, 2));
+        return;
+      }
+      console.log(opts.submit ? "Daily run: sending each form that fills cleanly." : "Daily run (dry): forms are filled and checked, nothing is sent.");
+      const r = await runDaily(store, profile, {
+        doc,
+        appliedIds,
+        filesDir,
+        count,
+        submit: !!opts.submit,
+        headless: !!opts.headless,
+        topUp: opts.topUp,
+        refresh: opts.discover
+          ? async () => {
+              console.log("Looking for new jobs on your own boards...");
+              const found = await discover(loadCompanies(PATHS.companies), profile, store);
+              console.log(`  ${found.newKept} new match${found.newKept === 1 ? "" : "es"}.`);
+            }
+          : undefined,
+        session: async () => (session = await openSession(PATHS.browser, { headless: !!opts.headless })),
+        log: (l) => console.log(l),
+      });
+      for (const s of r.skipped) console.log(`  Skipped ${s.item.company}: ${s.item.role} (${s.reason})`);
+      if (r.stopped) console.log(`Stopped: ${r.stopped}`);
+      const tally = new Map<string, number>();
+      for (const x of r.results) tally.set(x.state, (tally.get(x.state) ?? 0) + 1);
+      console.log(tally.size ? `\n${[...tally].map(([s, n]) => `${n} ${s.replace("_", " ")}`).join(", ")}.` : "\nNothing to apply to today.");
+      mkdirSync(PATHS.rhythm, { recursive: true });
+      writeFileSync(
+        path.join(PATHS.rhythm, "result.json"),
+        JSON.stringify(
+          { date: doc?.date ?? "", ranAt: new Date().toISOString(), submit: !!opts.submit, stopped: r.stopped, results: r.results, skipped: r.skipped.map((s) => ({ id: s.item.id, company: s.item.company, role: s.item.role, reason: s.reason, apply: s.item.apply })) },
+          null,
+          2,
+        ),
+      );
+    } finally {
+      await (session as Awaited<ReturnType<typeof openSession>> | null)?.close().catch(() => {});
+      store.close();
+    }
   });
 
 program

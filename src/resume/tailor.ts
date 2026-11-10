@@ -77,7 +77,8 @@ export function styleProblems(text: string): string[] {
 const DEFAULT_VOICE = `Write the way a real person talks, a little cleaner. Easy words, short sentences, one idea each. Warm and direct. No em dashes. Nothing that sounds like an ad, a slogan or a neat summary line. Never make anything up.`;
 
 export function loadVoice(file: string): string {
-  return existsSync(file) ? readFileSync(file, "utf8").replace(/^---[\s\S]*?---\s*/, "").slice(0, 8000) : DEFAULT_VOICE;
+  // The first rules carry the voice; the avoid-list and style checks are enforced in code, not by repeating them here.
+  return existsSync(file) ? readFileSync(file, "utf8").replace(/^---[\s\S]*?---\s*/, "").slice(0, 4500) : DEFAULT_VOICE;
 }
 
 export const ResumeDraftSchema = z.object({
@@ -138,7 +139,7 @@ function sourceFor(resume: Resume) {
 }
 
 function jobFor(job: Job) {
-  return { company: job.company, title: job.title, locations: job.locations, posting: job.description.slice(0, 8000) };
+  return { company: job.company, title: job.title, locations: job.locations, posting: job.description.slice(0, 5000) };
 }
 
 export type WrittenResume = { resume: Resume; draft: ResumeDraft; dropped: string[] };
@@ -226,7 +227,7 @@ export async function writeResume(resume: Resume, job: Job, profile: Profile, vo
   for (let attempt = 0; attempt < 2; attempt++) {
     const { value } = await claudeCodeJson({
       command: profile.rating.command,
-      model: profile.apply.model,
+      model: profile.apply.writeModel,
       effort: profile.apply.effort,
       system: RESUME_SYSTEM(voice),
       prompt,
@@ -267,7 +268,7 @@ export async function writeCoverLetter(resume: Resume, job: Job, profile: Profil
   for (let attempt = 0; attempt < 2; attempt++) {
     const { value } = await claudeCodeJson({
       command: profile.rating.command,
-      model: profile.apply.model,
+      model: profile.apply.writeModel,
       effort: profile.apply.effort,
       system: LETTER_SYSTEM(voice),
       prompt,

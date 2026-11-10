@@ -20,6 +20,8 @@ export const PATHS = {
   connections: path.join(DATA, "connections.csv"),
   /** Tailored resumes, one folder per job. */
   tailored: path.join(DATA, "tailored"),
+  /** The Weekly Rhythm's jobs for today, their PDFs, and what the daily run did. */
+  rhythm: path.join(DATA, "rhythm"),
   /** The apply browser's own profile: its cookies and sign-ins, apart from your everyday browser. */
   browser: path.join(DATA, "browser"),
 } as const;

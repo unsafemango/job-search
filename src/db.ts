@@ -316,6 +316,22 @@ export class Store {
       .get(jobId);
   }
 
+  /**
+   * True when another posting of the same job (same company, title and places, or the very same
+   * application form) was already sent or applied to.
+   */
+  sentDuplicate(id: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM jobs me, jobs j WHERE me.id = ? AND j.id <> me.id
+           AND (j.dedupe_key = me.dedupe_key OR (me.apply_url IS NOT NULL AND j.apply_url = me.apply_url))
+           AND (j.status IN ('applied', 'replied', 'interview', 'offer', 'rejected')
+                OR EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id AND a.state IN ('submitted', 'needs_you', 'unconfirmed'))) LIMIT 1`,
+      )
+      .get(id);
+    return !!row;
+  }
+
   /** Applications sent since local midnight. */
   sentToday(now = new Date()): number {
     const midnight = new Date(now);

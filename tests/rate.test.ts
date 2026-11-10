@@ -17,7 +17,7 @@ const profile = parseProfile({
   locations: { include: [{ match: "Toronto" }], remote: true },
   skills: ["TypeScript", "Python"],
   background: "BSc Computer Science, graduating May 2027. Canadian citizen.",
-  rating: { maxJobsPerRun: 10, maxSpendPerRunUsd: 0.05 },
+  rating: { model: "claude-opus-5-5", maxJobsPerRun: 10, maxSpendPerRunUsd: 0.05 },
 });
 
 function job(n: number, over: Partial<Job> = {}): Job {
@@ -72,7 +72,7 @@ function seeded(n: number, p: Profile = profile): Store {
 describe("profile", () => {
   it("fills in rating defaults", () => {
     const p = parseProfile({ name: "A", target: { titles: ["x"], levels: ["mid"] }, locations: {} });
-    expect(p.rating).toEqual({ provider: "claude-code", command: "claude", model: "claude-opus-5-5", effort: "low", maxJobsPerRun: 25, maxSpendPerRunUsd: 1 });
+    expect(p.rating).toEqual({ provider: "claude-code", command: "claude", model: "claude-haiku-5-5", effort: "low", maxJobsPerRun: 25, maxSpendPerRunUsd: 1 });
     expect(p.background).toBe("");
   });
 });
