@@ -21,6 +21,8 @@
   "followUpAfterDays": 7,
   "background": "BSc Computer Science, graduating May 2027. Two internships in backend web development. Canadian citizen.",
   "rating": {
+    "provider": "claude-code",
+    "command": "claude",
     "model": "claude-opus-5-5",
     "effort": "low",
     "maxJobsPerRun": 25,

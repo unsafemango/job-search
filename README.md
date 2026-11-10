@@ -18,7 +18,7 @@ Most job tools are built for volume. This one is built for attention: a short, r
 - Imports jobs from a **CSV** file for anything else
 - Filters by title, excluded keywords, seniority level, location, remote, excluded companies and posting age
 - Scores each match on title (35), skills named in the posting (35), location (20) and recency (10)
-- Optionally has Claude read each posting and rate how well it fits you, including requirements you don't meet, with a spend cap per run
+- Optionally has Claude read each posting and rate how well it fits you, including requirements you don't meet, using your own Claude Code sign-in (no API key needed)
 - Hides the same job posted twice, on one board or across boards, so it appears once
 - Tracks status: `new`, `shortlisted`, `applied`, `replied`, `interview`, `offer`, `rejected`, `dismissed`, with a dated history and notes
 - Reminds you to follow up on applications that have gone quiet
@@ -27,7 +27,7 @@ Most job tools are built for volume. This one is built for attention: a short, r
 ## Requirements
 
 - Node.js 24 or later (it uses the built-in `node:sqlite` module)
-- For `rate` only: an [Anthropic API key](https://console.anthropic.com/settings/keys)
+- For `rate` only: [Claude Code](https://claude.com/claude-code) signed in with your Claude account (or, if you prefer, an Anthropic API key)
 
 ## Getting started
 
@@ -70,20 +70,26 @@ npm run job -- stats                         # where your search stands
 
 The baseline score only counts your skills that a posting names. `rate` goes further: Claude reads each of your best unrated jobs alongside your profile and returns a fit from 0 to 100, the level the job is really hiring for, the skills of yours it uses, and any hard requirements you don't meet (such as "5+ years of experience"). That fit replaces the skills part of the score, and `show <id>` lists the details.
 
-1. Copy `.env.example` to `.env` and add your API key. `.env` is git-ignored.
+By default `rate` runs your local Claude Code in headless mode (`claude -p`), signed in with your Claude account. There is no API key and no per-token bill; each job uses a little of your Claude plan's usage, like a short chat would.
+
+1. Install [Claude Code](https://claude.com/claude-code) so the `claude` command works in your terminal, then run `claude` once and sign in with your Claude account.
 2. Add a `background` to your profile: degree and graduation date, experience, work authorization. The model sees this, your skills, target titles, levels and places, but not your name.
-3. Run `npm run job -- discover`, then `npm run job -- rate`.
+3. Run `npm run job -- discover`, then `npm run job -- rate --limit 3` to try it.
+
+Claude Code runs with no tools and an empty working folder, so it can only read the posting and your profile. Any `ANTHROPIC_API_KEY` is kept from it, so it always uses your sign-in rather than billing a key. If you're not signed in, or your plan's usage limit is reached, the run stops and says so.
 
 The `rating` settings in your profile control it:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `model` | `claude-opus-5-5` | The Claude model. `claude-haiku-5-5` costs far less, if you'd rather trade some judgment for price |
-| `effort` | `low` | How hard the model thinks: `low`, `medium` or `high`. Higher costs more |
+| `provider` | `claude-code` | `claude-code` uses your Claude sign-in. `api` uses the Anthropic API with `ANTHROPIC_API_KEY` from `.env`, billed per token |
+| `command` | `claude` | The Claude Code command, if it isn't on your `PATH` as `claude` |
+| `model` | `claude-opus-5-5` | The Claude model. `claude-sonnet-5-5` or `claude-haiku-5-5` use less of your plan (or cost less on the API) |
+| `effort` | `low` | How hard the model thinks: `low`, `medium` or `high`. Higher uses more |
 | `maxJobsPerRun` | `25` | At most this many jobs per run. `--limit <n>` overrides it |
-| `maxSpendPerRunUsd` | `1` | A run stops once its estimated cost reaches this. The job in progress finishes, so a run can go slightly over |
+| `maxSpendPerRunUsd` | `1` | `api` only: a run stops once its estimated cost reaches this. The job in progress finishes, so a run can go slightly over |
 
-Costs are estimates from token counts and list prices. `rate` prints what each run cost, and `stats` shows the total so far. A posting is never rated twice while it and your profile stay the same. Change either, and that job is rated again on the next run. If the model declines a posting, the API retries it on another Claude model automatically, where the chosen model supports that.
+A posting is never rated twice while it and your profile stay the same. Change either, and that job is rated again on the next run. With the `api` provider, `rate` prints what each run cost, `stats` shows the total, and if the model declines a posting, the API retries it on another Claude model where the chosen model supports that.
 
 ### Duplicates
 
@@ -171,7 +177,7 @@ src/
   discover.ts     fetch, filter, score, store
   rate.ts         model ratings within the run's caps
   db.ts           the SQLite store
-  model/          the rating shape, the Claude provider and pricing
+  model/          the rating shape, the local Claude Code and API providers, pricing
   profile/        the profile schema (zod)
   sources/        job boards, GitHub lists, Workday and CSV import
   jobs/           the job shape, filters and scoring

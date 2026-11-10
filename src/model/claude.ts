@@ -12,7 +12,7 @@ import { profileForModel, RatingSchema, type Rater, type RaterResult, type Ratin
  */
 const FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
 
-const INSTRUCTIONS = `You help one candidate decide which job postings are worth applying to. You get the candidate's profile once, then one posting at a time, and you rate how well the posting fits them.
+export const INSTRUCTIONS = `You help one candidate decide which job postings are worth applying to. You get the candidate's profile once, then one posting at a time, and you rate how well the posting fits them.
 
 Judge from what the posting actually asks for, not only its title: the work, the stack, the seniority it is really hiring at, and any hard requirements (years of experience, degree, citizenship, clearance, location). A posting the candidate clearly cannot get, such as one needing 5+ years when they are a new graduate, should get a low fit even if the skills match. Only list a requirement as unmet when the profile shows the candidate does not meet it; if the profile does not say, leave it out. If the posting has little detail, say so in the summary and rate on what is there.`;
 
@@ -25,7 +25,7 @@ function usageOf(u: Anthropic.Beta.BetaUsage | undefined): Usage {
   };
 }
 
-function postingText(job: Job): string {
+export function postingText(job: Job): string {
   const where = job.locations.join("; ") || (job.remote ? "Remote" : "not stated");
   return [
     `Company: ${job.company}`,
@@ -38,6 +38,7 @@ function postingText(job: Job): string {
 
 export class ClaudeRater implements Rater {
   readonly model: string;
+  readonly billed = true;
   private readonly client: Anthropic;
   private readonly effort: "low" | "medium" | "high";
 
@@ -77,9 +78,13 @@ export class ClaudeRater implements Rater {
 
 /** The rating in a response's text, checked against the schema (including the 0 to 100 range), or null. */
 function readRating(content: Anthropic.Beta.BetaContentBlock[]): Rating | null {
-  const text = content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+  return checkRating(content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(""));
+}
+
+/** A rating from JSON text or an already-parsed object, checked against the schema, or null. */
+export function checkRating(value: unknown): Rating | null {
   try {
-    const parsed = RatingSchema.safeParse(JSON.parse(text));
+    const parsed = RatingSchema.safeParse(typeof value === "string" ? JSON.parse(value) : value);
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

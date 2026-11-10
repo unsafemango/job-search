@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { STATUSES, Store, type Status, type StoredJob } from "./db.js";
 import { discover, ingest } from "./discover.js";
 import { ageDays } from "./jobs/job.js";
+import { ClaudeCodeRater } from "./model/claude-code.js";
 import { ClaudeRater, isFatal } from "./model/claude.js";
 import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
@@ -143,7 +144,7 @@ program
 
 program
   .command("rate")
-  .description("Have a model rate how well your best unrated jobs fit you (uses the Anthropic API, which costs money)")
+  .description("Have Claude rate how well your best unrated jobs fit you (your local Claude Code by default)")
   .option("-n, --limit <n>", "how many jobs at most (default: rating.maxJobsPerRun in your profile)")
   .action(async (opts: { limit?: string }) => {
     const profile = loadProfile(PATHS.profile);
@@ -151,17 +152,23 @@ program
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
       throw new Error(`--limit must be a whole number above 0, not "${opts.limit}".`);
     }
-    const { model, effort, maxSpendPerRunUsd } = profile.rating;
+    const { provider, command, model, effort, maxSpendPerRunUsd } = profile.rating;
+    const rater = provider === "api" ? new ClaudeRater({ model, effort }) : new ClaudeCodeRater({ model, effort, command });
     const store = new Store(PATHS.db);
-    console.log(`Rating with ${model} (effort: ${effort}), stopping at $${maxSpendPerRunUsd.toFixed(2)}.`);
+    console.log(
+      provider === "api"
+        ? `Rating with ${model} through the Anthropic API (effort: ${effort}), stopping at $${maxSpendPerRunUsd.toFixed(2)}.`
+        : `Rating with ${model} through your local Claude Code (effort: ${effort}). This uses your Claude plan, not an API key.`,
+    );
     try {
-      const r = await rateJobs(store, profile, new ClaudeRater({ model, effort }), {
+      const r = await rateJobs(store, profile, rater, {
         limit,
         isFatal,
         onProgress: (l) => console.log(l),
       });
       const tokens = `${r.inputTokens.toLocaleString()} tokens in, ${r.outputTokens.toLocaleString()} out`;
-      console.log(`\nRated ${r.rated} job${r.rated === 1 ? "" : "s"} for about $${r.costUsd.toFixed(2)} (${tokens}).`);
+      const cost = rater.billed ? ` for about $${r.costUsd.toFixed(2)}` : "";
+      console.log(`\nRated ${r.rated} job${r.rated === 1 ? "" : "s"}${cost} (${tokens}).`);
       if (r.failed.length) console.log(`${r.failed.length} could not be rated; they will be tried again next run.`);
       if (r.stopped) console.log(`Stopped early: ${r.stopped}`);
       if (r.remaining > 0) console.log(`${r.remaining} more job${r.remaining === 1 ? "" : "s"} still unrated. Run rate again to continue.`);
@@ -217,7 +224,10 @@ program
     const positive = c.replied + c.interview + c.offer;
     if (sent > 0) console.log(`\n${sent} sent, ${positive} with a positive reply (${Math.round((100 * positive) / sent)}%).`);
     const rated = store.ratingTotals();
-    if (rated.n > 0) console.log(`${rated.n} job${rated.n === 1 ? "" : "s"} rated by a model so far, for about $${rated.costUsd.toFixed(2)} in total.`);
+    if (rated.n > 0) {
+      const spent = rated.costUsd > 0 ? `, about $${rated.costUsd.toFixed(2)} of it billed through the API` : "";
+      console.log(`${rated.n} job${rated.n === 1 ? "" : "s"} rated by a model so far${spent}.`);
+    }
     if (c.applied > 0 && existsSync(PATHS.profile)) {
       const due = store.followUps(loadProfile(PATHS.profile).followUpAfterDays).length;
       if (due > 0) console.log(`${due} due a follow-up. See: npm run job -- followups`);

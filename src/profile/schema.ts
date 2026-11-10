@@ -44,6 +44,13 @@ export const ProfileSchema = z.object({
   /** How `rate` uses a model to judge fit. */
   rating: z
     .object({
+      /**
+       * "claude-code": your local Claude Code, signed in with your Claude plan; no API key, no per-token bill.
+       * "api": the Anthropic API with ANTHROPIC_API_KEY, billed per token.
+       */
+      provider: z.enum(["claude-code", "api"]).default("claude-code"),
+      /** The Claude Code command, for the "claude-code" provider. */
+      command: z.string().min(1).default("claude"),
       model: z.string().min(1).default("claude-opus-5-5"),
       effort: z.enum(["low", "medium", "high"]).default("low"),
       /** At most this many jobs are rated per run. */

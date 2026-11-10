@@ -5,7 +5,7 @@
  */
 import type { Store } from "./db.js";
 import { scoreJob } from "./jobs/score.js";
-import { ratingKey, type Rater } from "./model/rating.js";
+import { FatalRaterError, ratingKey, type Rater } from "./model/rating.js";
 import type { Profile } from "./profile/schema.js";
 
 export type RateOptions = {
@@ -51,7 +51,8 @@ export async function rateJobs(store: Store, profile: Profile, rater: Rater, opt
 
   let failuresInARow = 0;
   for (const job of todo) {
-    if (result.costUsd >= cap) {
+    // A Claude plan is not billed per token, so only a billed provider has a dollar cap.
+    if (rater.billed && result.costUsd >= cap) {
       result.stopped = `reached the spend cap of $${cap.toFixed(2)}`;
       break;
     }
@@ -59,7 +60,7 @@ export async function rateJobs(store: Store, profile: Profile, rater: Rater, opt
     try {
       outcome = await rater.rate(job, profile);
     } catch (err) {
-      const fatal = opts.isFatal?.(err);
+      const fatal = err instanceof FatalRaterError ? err.message : opts.isFatal?.(err);
       if (fatal) {
         result.stopped = fatal;
         break;

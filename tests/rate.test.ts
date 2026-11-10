@@ -5,7 +5,7 @@ import { ingest } from "../src/discover.js";
 import type { Job } from "../src/jobs/job.js";
 import { ClaudeRater, isFatal } from "../src/model/claude.js";
 import { costUsd } from "../src/model/pricing.js";
-import { ratingKey, type Rater, type RaterResult, type Rating } from "../src/model/rating.js";
+import { FatalRaterError, ratingKey, type Rater, type RaterResult, type Rating } from "../src/model/rating.js";
 import { parseProfile, type Profile } from "../src/profile/schema.js";
 import { rateJobs } from "../src/rate.js";
 
@@ -38,10 +38,11 @@ function job(n: number, over: Partial<Job> = {}): Job {
 const usage = { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
 /** A rater that answers from a function, and counts calls. */
-function fakeRater(answer: (job: Job) => RaterResult | Error, model = "claude-opus-5-5"): Rater & { calls: string[] } {
+function fakeRater(answer: (job: Job) => RaterResult | Error, model = "claude-opus-5-5", billed = true): Rater & { calls: string[] } {
   const calls: string[] = [];
   return {
     model,
+    billed,
     calls,
     async rate(j) {
       calls.push(j.id);
@@ -71,7 +72,7 @@ function seeded(n: number, p: Profile = profile): Store {
 describe("profile", () => {
   it("fills in rating defaults", () => {
     const p = parseProfile({ name: "A", target: { titles: ["x"], levels: ["mid"] }, locations: {} });
-    expect(p.rating).toEqual({ model: "claude-opus-5-5", effort: "low", maxJobsPerRun: 25, maxSpendPerRunUsd: 1 });
+    expect(p.rating).toEqual({ provider: "claude-code", command: "claude", model: "claude-opus-5-5", effort: "low", maxJobsPerRun: 25, maxSpendPerRunUsd: 1 });
     expect(p.background).toBe("");
   });
 });
@@ -140,6 +141,18 @@ describe("rateJobs", () => {
     const capped = await rateJobs(store, profile, fakeRater(() => ok(50, 0.02)), { now: NOW });
     expect(capped).toMatchObject({ rated: 3, remaining: 5, stopped: "reached the spend cap of $0.05" });
     store.close();
+  });
+
+  it("has no dollar cap for a provider that is not billed per token, and stops on a fatal rater error", async () => {
+    const store = seeded(5);
+    const plan = await rateJobs(store, profile, fakeRater(() => ok(50, 0.02), "claude-opus-5-5", false), { now: NOW });
+    expect(plan).toMatchObject({ rated: 5, stopped: null });
+
+    const fresh = seeded(3);
+    const out = await rateJobs(fresh, profile, fakeRater(() => new FatalRaterError("Not signed in.")), { now: NOW });
+    expect(out).toMatchObject({ rated: 0, failed: [], stopped: "Not signed in." });
+    store.close();
+    fresh.close();
   });
 
   it("carries on past one failure, stops after three in a row, and stops at once on a fatal error", async () => {

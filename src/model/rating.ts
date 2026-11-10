@@ -27,8 +27,13 @@ export type RaterResult =
 export interface Rater {
   /** The model ratings are cached under. */
   readonly model: string;
+  /** False when calls are not billed per token (a Claude plan), so the dollar cap does not apply. */
+  readonly billed: boolean;
   rate(job: Job, profile: Profile): Promise<RaterResult>;
 }
+
+/** A problem that will fail every job the same way (not signed in, out of quota), so a run stops. */
+export class FatalRaterError extends Error {}
 
 /** Bump when the prompt or schema changes in a way that should re-rate everything. */
 export const RATING_VERSION = 1;

@@ -36,7 +36,9 @@ Useful with no browser automation and no model.
 ### Phase 2: model-rated fit
 
 - [x] A small model interface (`Rater` in `src/model/rating.ts`) returning a
-      typed, schema-checked rating, with Claude behind it (`src/model/claude.ts`)
+      typed, schema-checked rating, with two providers: local Claude Code on
+      your Claude plan (`src/model/claude-code.ts`, the default) and the
+      Anthropic API (`src/model/claude.ts`)
 - [x] Rate each surviving job against the profile: stack match, level match,
       hard requirements the profile does not meet (`rate`)
 - [x] Cache ratings by posting hash so an unchanged posting is not rated twice
