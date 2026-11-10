@@ -36,6 +36,22 @@ export const ProfileSchema = z.object({
   maxPostingAgeDays: z.number().int().positive().default(45),
   /** An application with no reply is due a follow-up this many days after you applied or last followed up. */
   followUpAfterDays: z.number().int().positive().default(7),
+  /**
+   * What the model should know about you beyond skills: degree and graduation
+   * date, experience, work authorization. Used only by `rate`.
+   */
+  background: z.string().default(""),
+  /** How `rate` uses a model to judge fit. */
+  rating: z
+    .object({
+      model: z.string().min(1).default("claude-opus-5-5"),
+      effort: z.enum(["low", "medium", "high"]).default("low"),
+      /** At most this many jobs are rated per run. */
+      maxJobsPerRun: z.number().int().positive().default(25),
+      /** A run stops once its estimated cost reaches this, in US dollars. */
+      maxSpendPerRunUsd: z.number().positive().default(1),
+    })
+    .prefault({}),
 });
 
 export type Profile = z.infer<typeof ProfileSchema>;

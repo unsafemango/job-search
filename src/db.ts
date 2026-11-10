@@ -6,6 +6,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dedupeKey, type Job } from "./jobs/job.js";
+import type { Rating, Usage } from "./model/rating.js";
 
 export const STATUSES = ["new", "shortlisted", "applied", "replied", "interview", "offer", "rejected", "dismissed"] as const;
 export type Status = (typeof STATUSES)[number];
@@ -68,6 +69,16 @@ CREATE TABLE IF NOT EXISTS jobs (
   last_seen TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS jobs_by_status ON jobs (status, score DESC);
+CREATE TABLE IF NOT EXISTS ratings (
+  key TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  rating TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  cost_usd REAL NOT NULL,
+  rated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id TEXT NOT NULL REFERENCES jobs (id),
@@ -224,6 +235,40 @@ export class Store {
       }))
       .filter((f) => f.days >= afterDays)
       .sort((a, b) => b.days - a.days || b.job.score - a.job.score);
+  }
+
+  /** A cached rating, by `ratingKey`. */
+  rating(key: string): Rating | null {
+    const row = this.db.prepare("SELECT rating FROM ratings WHERE key = ?").get(key) as { rating: string } | undefined;
+    return row ? (JSON.parse(row.rating) as Rating) : null;
+  }
+
+  saveRating(key: string, jobId: string, model: string, rating: Rating, usage: Usage, costUsd: number, now = new Date()): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO ratings (key, job_id, model, rating, input_tokens, output_tokens, cost_usd, rated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(key, jobId, model, JSON.stringify(rating), usage.inputTokens, usage.outputTokens, costUsd, now.toISOString());
+  }
+
+  /** Every rating ever made, and what they cost. */
+  ratingTotals(): { n: number; costUsd: number } {
+    const row = this.db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost FROM ratings").get() as { n: number; cost: number };
+    return { n: row.n, costUsd: row.cost };
+  }
+
+  /** Kept, visible jobs in these statuses, best first: the ones worth rating. */
+  visible(statuses: Status[], limit: number): StoredJob[] {
+    const marks = statuses.map(() => "?").join(", ");
+    return this.db
+      .prepare(`${VISIBLE} AND status IN (${marks}) ORDER BY score DESC, posted_at DESC LIMIT ?`)
+      .all(...statuses, limit)
+      .map(fromRow);
+  }
+
+  setScore(id: string, score: number, reasons: string[]): void {
+    this.db.prepare("UPDATE jobs SET score = ?, reasons = ? WHERE id = ?").run(score, JSON.stringify(reasons), id);
   }
 
   /** How many kept jobs are in each status, without duplicates. */

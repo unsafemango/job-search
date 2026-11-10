@@ -1,8 +1,9 @@
 /**
- * The baseline fit score, 0 to 100, with the reasons behind it. No model:
- * title, skills found in the posting, location and age. A model-rated score
- * replaces the skills part in phase 2.
+ * The fit score, 0 to 100, with the reasons behind it: title, skills, location
+ * and age. Without a model, the skills part counts your skills named in the
+ * posting. Once `rate` has rated a job, the model's fit replaces that part.
  */
+import type { Rating } from "../model/rating.js";
 import type { Profile } from "../profile/schema.js";
 import { locationMatch } from "./filters.js";
 import { ageDays, hasTerm, type Job } from "./job.js";
@@ -13,7 +14,7 @@ const SKILLS_FOR_FULL_MATCH = 5;
 
 export type Score = { score: number; reasons: string[] };
 
-export function scoreJob(job: Job, profile: Profile, now = new Date()): Score {
+export function scoreJob(job: Job, profile: Profile, now = new Date(), rating?: Rating | null): Score {
   const reasons: string[] = [];
 
   // Earlier titles in the profile are the ones you want most.
@@ -22,7 +23,13 @@ export function scoreJob(job: Job, profile: Profile, now = new Date()): Score {
   if (titleIndex >= 0) reasons.push(`title matches "${profile.target.titles[titleIndex]}"`);
 
   let skillsPart: number;
-  if (!job.description) {
+  if (rating) {
+    skillsPart = rating.fit / 100;
+    reasons.push(`model fit ${rating.fit}/100: ${rating.summary}`);
+    if (rating.stack.length) reasons.push(`uses your skills: ${rating.stack.join(", ")}`);
+    if (rating.unmet.length) reasons.push(`you may not meet: ${rating.unmet.join("; ")}`);
+    if (!profile.target.levels.includes(rating.level)) reasons.push(`model reads the level as ${rating.level}`);
+  } else if (!job.description) {
     skillsPart = 0.4;
     reasons.push("no description to check skills against");
   } else if (profile.skills.length === 0) {

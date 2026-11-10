@@ -18,6 +18,7 @@ Most job tools are built for volume. This one is built for attention: a short, r
 - Imports jobs from a **CSV** file for anything else
 - Filters by title, excluded keywords, seniority level, location, remote, excluded companies and posting age
 - Scores each match on title (35), skills named in the posting (35), location (20) and recency (10)
+- Optionally has Claude read each posting and rate how well it fits you, including requirements you don't meet, with a spend cap per run
 - Hides the same job posted twice, on one board or across boards, so it appears once
 - Tracks status: `new`, `shortlisted`, `applied`, `replied`, `interview`, `offer`, `rejected`, `dismissed`, with a dated history and notes
 - Reminds you to follow up on applications that have gone quiet
@@ -26,6 +27,7 @@ Most job tools are built for volume. This one is built for attention: a short, r
 ## Requirements
 
 - Node.js 24 or later (it uses the built-in `node:sqlite` module)
+- For `rate` only: an [Anthropic API key](https://console.anthropic.com/settings/keys)
 
 ## Getting started
 
@@ -56,12 +58,32 @@ npm run job -- discover                      # read the boards, filter and score
 npm run job -- import jobs.csv               # add jobs from a CSV file
 npm run job -- list                          # best new matches first
 npm run job -- list --status applied -n 50   # filter by status
+npm run job -- rate                          # have Claude rate your best unrated jobs
 npm run job -- show <id>                     # score breakdown and history
 npm run job -- mark <id> applied --note "Referred by Sam"
 npm run job -- followups                     # applications due a follow-up
 npm run job -- followed-up <id> --note "Emailed the recruiter"
 npm run job -- stats                         # where your search stands
 ```
+
+### Model-rated fit
+
+The baseline score only counts your skills that a posting names. `rate` goes further: Claude reads each of your best unrated jobs alongside your profile and returns a fit from 0 to 100, the level the job is really hiring for, the skills of yours it uses, and any hard requirements you don't meet (such as "5+ years of experience"). That fit replaces the skills part of the score, and `show <id>` lists the details.
+
+1. Copy `.env.example` to `.env` and add your API key. `.env` is git-ignored.
+2. Add a `background` to your profile: degree and graduation date, experience, work authorization. The model sees this, your skills, target titles, levels and places, but not your name.
+3. Run `npm run job -- discover`, then `npm run job -- rate`.
+
+The `rating` settings in your profile control it:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `model` | `claude-opus-5-5` | The Claude model. `claude-haiku-5-5` costs far less, if you'd rather trade some judgment for price |
+| `effort` | `low` | How hard the model thinks: `low`, `medium` or `high`. Higher costs more |
+| `maxJobsPerRun` | `25` | At most this many jobs per run. `--limit <n>` overrides it |
+| `maxSpendPerRunUsd` | `1` | A run stops once its estimated cost reaches this. The job in progress finishes, so a run can go slightly over |
+
+Costs are estimates from token counts and list prices. `rate` prints what each run cost, and `stats` shows the total so far. A posting is never rated twice while it and your profile stay the same. Change either, and that job is rated again on the next run. If the model declines a posting, the API retries it on another Claude model automatically, where the chosen model supports that.
 
 ### Duplicates
 
@@ -139,7 +161,7 @@ To keep a second profile or data set, point `JOB_SEARCH_DATA` at another folder.
 ## Development
 
 ```bash
-npm test              # offline tests, no network
+npm test              # offline tests: no network, no API calls, no cost
 npm run check-types   # TypeScript type check
 ```
 
@@ -147,7 +169,9 @@ npm run check-types   # TypeScript type check
 src/
   cli.ts          the commands
   discover.ts     fetch, filter, score, store
+  rate.ts         model ratings within the run's caps
   db.ts           the SQLite store
+  model/          the rating shape, the Claude provider and pricing
   profile/        the profile schema (zod)
   sources/        job boards, GitHub lists, Workday and CSV import
   jobs/           the job shape, filters and scoring
@@ -159,7 +183,8 @@ data/             your files (git-ignored; examples are tracked)
 
 See [PLAN.md](PLAN.md) for the full plan. Next up:
 
-- Model-rated fit, tailored resumes and a local review dashboard
+- Tailored one-page resumes, with every claim checked against your profile
+- A local review dashboard
 - Assisted form filling, where you approve every submission
 
 The tool will never send applications unattended, get around bot detection or CAPTCHAs, or write anything on a form that your profile doesn't support.

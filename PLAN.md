@@ -35,12 +35,12 @@ Useful with no browser automation and no model.
 
 ### Phase 2: model-rated fit
 
-- [ ] A small model interface (`decide(state, questions)` returning typed
-      answers), with one provider behind it
-- [ ] Rate each surviving job against the profile: stack match, level match,
-      hard requirements the profile does not meet
-- [ ] Cache ratings by posting hash so an unchanged posting is not rated twice
-- [ ] Spend cap per run, and a cost report
+- [x] A small model interface (`Rater` in `src/model/rating.ts`) returning a
+      typed, schema-checked rating, with Claude behind it (`src/model/claude.ts`)
+- [x] Rate each surviving job against the profile: stack match, level match,
+      hard requirements the profile does not meet (`rate`)
+- [x] Cache ratings by posting hash so an unchanged posting is not rated twice
+- [x] Spend cap per run, and a cost report (`rate`, `stats`)
 
 ### Phase 3: prepare
 
