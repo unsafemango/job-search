@@ -113,6 +113,13 @@ describe("checkPlan", () => {
     ]);
   });
 
+  it("does not mistake the word design for an e-signature", () => {
+    const q = "Have you built software where you had to design and implement concurrent operations?";
+    const r = checkPlan(plan([{ id: "f0", values: ["Yes"] }]), [field("f0", q, { kind: "select", options: ["Yes", "No"] })], job, profile);
+    expect(r.fields[0]!.values).toEqual(["Yes"]);
+    expect(r.problems).toEqual([]);
+  });
+
   it("passes on Claude's own doubts", () => {
     const r = checkPlan(plan([], "needs_review"), [], job, profile);
     expect(r.problems).toEqual(["Claude: needs review: "]);

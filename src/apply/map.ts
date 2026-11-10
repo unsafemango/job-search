@@ -118,7 +118,7 @@ const SPONSOR = /sponsor/i;
 /** "Are you authorized to work here without sponsorship?": Yes when you are, the opposite of "will you require sponsorship?". */
 const AUTHORIZED_WITHOUT_SPONSORSHIP = /authori[sz]ed[^.?]*without[^.?]*sponsor|without[^.?]*sponsor[^.?]*authori[sz]ed/i;
 const AUTHORIZED = /(legally )?(authori[sz]ed|entitled|eligible|permitted)\b.*\bwork|right to work|work authori[sz]ation/i;
-const SIGNATURE = /signature|e-?sign|sign (your|here)|type your (full )?(legal )?name to|by typing your name/i;
+const SIGNATURE = /signature|\be-?sign|sign (your|here)|type your (full )?(legal )?name to|by typing your name/i;
 const YES = /^(yes|y|true)\b/i;
 const NO = /^(no|n|false)\b/i;
 
