@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import type { Level } from "../profile/schema.js";
 
-export type SourceName = "greenhouse" | "lever" | "ashby";
+export type SourceName = "greenhouse" | "lever" | "ashby" | "github" | "workday" | "csv";
 
 /** One posting, in the same shape whichever board it came from. */
 export type Job = {
@@ -15,6 +16,8 @@ export type Job = {
   postedAt: string | null;
   /** Plain text. Empty when the board gives none. */
   description: string;
+  /** The level the source says this job is, used when the title states none (e.g. a new-grad list). */
+  level?: Level;
 };
 
 /** A short, stable id: the same posting gets the same id on every run. */

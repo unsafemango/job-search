@@ -14,7 +14,8 @@ Most job tools are built for volume. This one is built for attention: a short, r
 
 ## Features
 
-- Reads postings from **Greenhouse**, **Lever** and **Ashby** public APIs
+- Reads postings from **Greenhouse**, **Lever** and **Ashby** public APIs, **Workday** careers sites, and community job lists on **GitHub** (such as SimplifyJobs)
+- Imports jobs from a **CSV** file for anything else
 - Filters by title, excluded keywords, seniority level, location, remote, excluded companies and posting age
 - Scores each match on title (35), skills named in the posting (35), location (20) and recency (10)
 - Hides the same job posted twice, on one board or across boards, so it appears once
@@ -40,7 +41,7 @@ npm run job -- init
 | File | What it holds |
 | --- | --- |
 | `data/profile.json` | The roles, levels, locations, skills and companies you want, and the ones you don't |
-| `data/companies.json` | The company job boards to read |
+| `data/companies.json` | The job boards and job lists to read |
 
 Edit both, then find jobs:
 
@@ -52,6 +53,7 @@ npm run job -- discover
 
 ```bash
 npm run job -- discover                      # read the boards, filter and score
+npm run job -- import jobs.csv               # add jobs from a CSV file
 npm run job -- list                          # best new matches first
 npm run job -- list --status applied -n 50   # filter by status
 npm run job -- show <id>                     # score breakdown and history
@@ -99,19 +101,38 @@ When you follow up, run `followed-up <id>`. That logs it in the job's history an
 
 Titles earlier in the list count as better matches. Levels are `internship`, `new_grad`, `mid` and `senior`.
 
-### Companies
+### Companies and job lists
 
-Each entry is a board and the company's name in that board's URL:
+Each entry in `data/companies.json` is one board or list to read:
 
 ```json
 [
   { "source": "greenhouse", "slug": "stripe", "name": "Stripe" },
   { "source": "lever", "slug": "palantir", "name": "Palantir" },
-  { "source": "ashby", "slug": "ramp", "name": "Ramp" }
+  { "source": "ashby", "slug": "ramp", "name": "Ramp" },
+  { "source": "workday", "slug": "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite", "name": "NVIDIA" },
+  { "source": "github", "slug": "SimplifyJobs/New-Grad-Positions", "name": "Simplify New Grad list", "level": "new_grad" }
 ]
 ```
 
-For example, `boards.greenhouse.io/stripe` has the slug `stripe`.
+| Source | What `slug` is | Notes |
+| --- | --- | --- |
+| `greenhouse`, `lever`, `ashby` | The company's name in the board's URL, e.g. `stripe` for `boards.greenhouse.io/stripe` | |
+| `workday` | The careers site URL, as it appears in your browser | Searched for your target titles. Location, exact date and description are fetched only for postings whose title you'd keep, up to 40 per site |
+| `github` | `owner/repo` of a list in the [SimplifyJobs](https://github.com/SimplifyJobs) format | Covers many companies. These lists have no descriptions, so the skills part of the score is estimated |
+
+The optional `level` (`internship`, `new_grad`, `mid` or `senior`) is used when a job's title doesn't state one. Set it for lists that are all one level: a new-grad list often titles its jobs just "Software Engineer", which would otherwise count as `mid`.
+
+### Importing a CSV
+
+For boards with no API, put the jobs in a CSV file and run `import`:
+
+```csv
+company,title,url,location,remote,posted,level,description
+Acme,Software Engineer,https://acme.example/jobs/1,"Toronto, ON",no,2026-11-01,new_grad,"TypeScript, React"
+```
+
+Only `company`, `title` and `url` are required, and columns can be in any order. Separate several locations with `;`. Imported jobs are filtered, scored and de-duplicated like any other, and importing the same file twice adds nothing new.
 
 To keep a second profile or data set, point `JOB_SEARCH_DATA` at another folder.
 
@@ -128,7 +149,7 @@ src/
   discover.ts     fetch, filter, score, store
   db.ts           the SQLite store
   profile/        the profile schema (zod)
-  sources/        job board parsers
+  sources/        job boards, GitHub lists, Workday and CSV import
   jobs/           the job shape, filters and scoring
 tests/            offline tests
 data/             your files (git-ignored; examples are tracked)
@@ -138,7 +159,6 @@ data/             your files (git-ignored; examples are tracked)
 
 See [PLAN.md](PLAN.md) for the full plan. Next up:
 
-- More sources (GitHub job lists, Workday, CSV import)
 - Model-rated fit, tailored resumes and a local review dashboard
 - Assisted form filling, where you approve every submission
 

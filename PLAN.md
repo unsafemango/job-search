@@ -28,8 +28,8 @@ Useful with no browser automation and no model.
 - [x] Sources: Greenhouse, Lever, Ashby public APIs (`src/sources/`)
 - [x] Filters driven by the profile, each with a reason (`src/jobs/filters.ts`)
 - [x] Baseline score with reasons, no model (`src/jobs/score.ts`)
-- [x] CLI: `init`, `discover`, `list`, `show`, `mark`, `followups`, `followed-up`, `stats`
-- [ ] More sources: public GitHub job lists, Workday posting data, CSV import
+- [x] CLI: `init`, `discover`, `list`, `show`, `import`, `mark`, `followups`, `followed-up`, `stats`
+- [x] More sources: public GitHub job lists (SimplifyJobs format), Workday, CSV import
 - [x] Cross-source duplicate detection (same company, title and place)
 - [x] Follow-up reminders (applied N days ago, no reply): `followups`, `followed-up`
 

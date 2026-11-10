@@ -17,6 +17,22 @@ export function levelOf(title: string): Level {
   return "mid";
 }
 
+/** The level a job is: what its title states, else what its source says, else mid-level. */
+export function jobLevel(job: Pick<Job, "title" | "level">): Level {
+  const fromTitle = levelOf(job.title);
+  return fromTitle === "mid" && job.level ? job.level : fromTitle;
+}
+
+/** Why a job's title rules it out, or null. Needs only the title, so a source can check before fetching more. */
+export function titleReason(job: Pick<Job, "title" | "level">, profile: Profile): string | null {
+  if (!profile.target.titles.some((t) => hasTerm(job.title, t))) return "title does not match your target roles";
+  const excluded = profile.target.excludeKeywords.find((k) => hasTerm(job.title, k));
+  if (excluded) return `title contains "${excluded}"`;
+  const level = jobLevel(job);
+  if (!profile.target.levels.includes(level)) return `level is ${level}`;
+  return null;
+}
+
 export type LocationMatch = { weight: number; label: string };
 
 /** How well a job's location suits the profile, or null when it does not. */
@@ -48,12 +64,8 @@ export function filterJob(job: Job, profile: Profile, now = new Date()): string 
   const age = ageDays(job, now);
   if (age !== null && age > profile.maxPostingAgeDays) return `posted ${age} days ago`;
 
-  if (!profile.target.titles.some((t) => hasTerm(job.title, t))) return "title does not match your target roles";
-  const excluded = profile.target.excludeKeywords.find((k) => hasTerm(job.title, k));
-  if (excluded) return `title contains "${excluded}"`;
-
-  const level = levelOf(job.title);
-  if (!profile.target.levels.includes(level)) return `level is ${level}`;
+  const byTitle = titleReason(job, profile);
+  if (byTitle) return byTitle;
 
   if (!locationMatch(job, profile)) return "location is outside your list";
   return null;

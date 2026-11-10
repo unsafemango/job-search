@@ -1,6 +1,6 @@
 /** Fetch every company's board, filter and score each posting, and store the lot. */
 import type { Store } from "./db.js";
-import { filterJob, levelOf } from "./jobs/filters.js";
+import { filterJob, jobLevel } from "./jobs/filters.js";
 import type { Job } from "./jobs/job.js";
 import { scoreJob } from "./jobs/score.js";
 import type { Profile } from "./profile/schema.js";
@@ -23,7 +23,7 @@ export function ingest(jobs: Job[], profile: Profile, store: Store, now = new Da
   for (const job of jobs) {
     const filteredReason = filterJob(job, profile, now);
     const { score, reasons } = filteredReason ? { score: 0, reasons: [] } : scoreJob(job, profile, now);
-    const isNew = store.upsert(job, { level: levelOf(job.title), score, reasons, filteredReason }, now);
+    const isNew = store.upsert(job, { level: jobLevel(job), score, reasons, filteredReason }, now);
     if (filteredReason) continue;
     if (store.isHiddenDuplicate(job.id)) {
       out.duplicates++;
@@ -41,7 +41,7 @@ export async function discover(
   companies: Company[],
   profile: Profile,
   store: Store,
-  fetchOne: (c: Company) => Promise<Job[]> = fetchCompany,
+  fetchOne: (c: Company) => Promise<Job[]> = (c) => fetchCompany(c, fetch, profile),
   now = new Date(),
 ): Promise<DiscoverResult> {
   const result: DiscoverResult = { fetched: 0, kept: 0, newKept: 0, duplicates: 0, failures: [] };

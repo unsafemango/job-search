@@ -1,11 +1,12 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { STATUSES, Store, type Status, type StoredJob } from "./db.js";
-import { discover } from "./discover.js";
+import { discover, ingest } from "./discover.js";
 import { ageDays } from "./jobs/job.js";
 import { PATHS } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
+import { CSV_COLUMNS, parseCsvJobs } from "./sources/csv.js";
 import { loadCompanies } from "./sources/index.js";
 
 const program = new Command().name("job").description("Find well-matched jobs and track your applications.");
@@ -58,6 +59,33 @@ program
     }
     store.close();
     if (result.failures.length === companies.length && companies.length > 0) process.exitCode = 1;
+  });
+
+program
+  .command("import <file>")
+  .description(`Add jobs from a CSV file (columns: ${CSV_COLUMNS.join(", ")}; company, title and url required)`)
+  .action((file: string) => {
+    const profile = loadProfile(PATHS.profile);
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      throw new Error(`Could not read ${file}.`);
+    }
+    const { jobs, errors } = parseCsvJobs(text);
+    for (const e of errors) console.log(`  Skipped line ${e.line}: ${e.error}`);
+    const store = new Store(PATHS.db);
+    const { kept, newKept, duplicates } = ingest(jobs, profile, store);
+    console.log(`Read ${jobs.length} job${jobs.length === 1 ? "" : "s"} from ${file}.`);
+    console.log(`${kept} match your profile, ${newKept} of them new.`);
+    if (duplicates) console.log(`${duplicates} more were the same job as one you already have, and are hidden.`);
+    const dropped = jobs.flatMap((j) => {
+      const reason = store.get(j.id)?.filteredReason;
+      return reason ? [`  ${j.company}: ${j.title}  (${reason})`] : [];
+    });
+    store.close();
+    if (dropped.length) console.log(`\nDid not match your profile:\n${dropped.join("\n")}`);
+    if (errors.length && !jobs.length) process.exitCode = 1;
   });
 
 program

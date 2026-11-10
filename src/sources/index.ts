@@ -1,18 +1,18 @@
 /**
- * Job boards with a public, documented posting API. Each source has a
- * `parse` (pure, tested offline) and a `url`; fetching is shared.
+ * Where jobs come from. Greenhouse, Lever and Ashby have one public JSON
+ * response per company: each has a `parse` (pure, tested offline) and a `url`.
+ * GitHub lists and Workday sites need more requests and live in their own
+ * files. CSV files are imported by hand (csv.ts).
  */
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import { htmlToText, jobId, type Job, type SourceName } from "../jobs/job.js";
+import { htmlToText, jobId, type Job } from "../jobs/job.js";
+import type { Profile } from "../profile/schema.js";
+import { CompanySchema, isRemoteText, splitPlaces, str, unique, USER_AGENT, type Company } from "./common.js";
+import { fetchGithub } from "./github.js";
+import { fetchWorkday } from "./workday.js";
 
-export const CompanySchema = z.object({
-  source: z.enum(["greenhouse", "lever", "ashby"]),
-  /** The company's name in the board's URL, e.g. boards.greenhouse.io/<slug>. */
-  slug: z.string().min(1),
-  name: z.string().min(1),
-});
-export type Company = z.infer<typeof CompanySchema>;
+export { CompanySchema, type Company } from "./common.js";
 
 export function loadCompanies(file: string): Company[] {
   let text: string;
@@ -25,12 +25,6 @@ export function loadCompanies(file: string): Company[] {
 }
 
 type Source = { url: (slug: string) => string; parse: (body: unknown, company: Company) => Job[] };
-
-const str = (v: unknown): string => (typeof v === "string" ? v : "");
-const isRemoteText = (s: string): boolean => /\bremote\b/i.test(s);
-/** "Toronto, ON; Remote - Canada" and "A | B" are several places. */
-const splitPlaces = (s: string): string[] => s.split(/\s*[;|•]\s*/).map((p) => p.trim()).filter(Boolean);
-const unique = (xs: string[]): string[] => [...new Set(xs)];
 
 const greenhouse: Source = {
   url: (slug) => `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(slug)}/jobs?content=true`,
@@ -101,14 +95,22 @@ const ashby: Source = {
   },
 };
 
-export const SOURCES: Record<SourceName, Source> = { greenhouse, lever, ashby };
+/** Boards with one JSON response per company. */
+export const SOURCES = { greenhouse, lever, ashby } satisfies Record<string, Source>;
 
-export async function fetchCompany(company: Company, fetchFn: typeof fetch = fetch): Promise<Job[]> {
-  const source = SOURCES[company.source];
-  const res = await fetchFn(source.url(company.slug), {
-    headers: { accept: "application/json", "user-agent": "job-search-tool" },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) throw new Error(`${company.source} returned ${res.status} for "${company.slug}"`);
-  return source.parse(await res.json(), company).filter((j) => j.title && j.url);
+export async function fetchCompany(company: Company, fetchFn: typeof fetch = fetch, profile?: Profile): Promise<Job[]> {
+  const ctx = { fetchFn, profile };
+  let jobs: Job[];
+  if (company.source === "github") jobs = await fetchGithub(company, ctx);
+  else if (company.source === "workday") jobs = await fetchWorkday(company, ctx);
+  else {
+    const source = SOURCES[company.source];
+    const res = await fetchFn(source.url(company.slug), {
+      headers: { accept: "application/json", "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`${company.source} returned ${res.status} for "${company.slug}"`);
+    jobs = source.parse(await res.json(), company);
+  }
+  return jobs.filter((j) => j.title && j.url);
 }
