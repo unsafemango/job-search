@@ -1,0 +1,25 @@
+{
+  "name": "Ada Lovelace",
+  "headline": "Software Engineer",
+  "contactLine": ["Toronto, Ontario, Canada", "example.com", "linkedin.com/in/example", "ada@example.com"],
+  "summary": "Software engineer with 3+ years building TypeScript and React web apps and PostgreSQL-backed APIs on AWS.",
+  "experience": [
+    {
+      "title": "Software Developer",
+      "company": "Example Corp",
+      "location": "Toronto, Ontario, Canada",
+      "dates": "Jan 2023 – Present",
+      "bullets": [
+        "Built a React and TypeScript dashboard used by 2,000 staff.",
+        "Designed REST APIs in Node.js on PostgreSQL, cutting page load time by 40%.",
+        "Wrote Cypress end-to-end tests and ran them in GitHub Actions."
+      ]
+    }
+  ],
+  "projects": [{ "name": "Side Project (Go)", "bullets": ["A small Go service that ingests events into Redis."] }],
+  "skills": [
+    { "group": "Languages", "items": ["TypeScript", "JavaScript", "Go", "SQL"] },
+    { "group": "Tools", "items": ["React", "Node.js", "PostgreSQL", "AWS", "Docker"] }
+  ],
+  "education": [{ "credential": "BSc in Computer Science", "school": "Example University", "location": "Toronto, Ontario, Canada" }]
+}

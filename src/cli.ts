@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { STATUSES, Store, type Status, type StoredJob } from "./db.js";
@@ -10,7 +10,10 @@ import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
 import { rateJobs } from "./rate.js";
 import { openSession } from "./apply/browser.js";
-import { applyJobs } from "./apply/run.js";
+import { applyJobs, tailoredFile } from "./apply/run.js";
+import { renderPdf } from "./resume/render.js";
+import { loadResume } from "./resume/schema.js";
+import { tailorResume, trimOnce } from "./resume/tailor.js";
 import { createInterface } from "node:readline/promises";
 import { CSV_COLUMNS, parseCsvJobs } from "./sources/csv.js";
 import { loadCompanies } from "./sources/index.js";
@@ -218,6 +221,45 @@ program
       }
     } finally {
       await (session as Awaited<ReturnType<typeof openSession>> | null)?.close().catch(() => {});
+      store.close();
+    }
+  });
+
+program
+  .command("tailor <ids...>")
+  .description("Write a resume tailored to each job from data/resume.json (only reorders and picks; every claim checked)")
+  .action(async (ids: string[]) => {
+    const profile = loadProfile(PATHS.profile);
+    const resume = loadResume(PATHS.resumeData);
+    const store = new Store(PATHS.db);
+    try {
+      for (const id of ids) {
+        const job = store.get(id);
+        if (!job) {
+          console.log(`${id}: no such job`);
+          continue;
+        }
+        const t = await tailorResume(resume, job, profile);
+        const file = tailoredFile(profile, id);
+        mkdirSync(path.dirname(file), { recursive: true });
+        // Trim the least relevant bullets until it fits on two pages, like most experienced resumes.
+        let pages = await renderPdf(t.resume, file);
+        for (let next = trimOnce(t.resume); pages > 2 && next; next = trimOnce(t.resume)) {
+          t.resume = next;
+          pages = await renderPdf(t.resume, file);
+        }
+        writeFileSync(file.replace(/\.pdf$/, ".json"), JSON.stringify({ plan: t.plan, refused: t.refused, resume: t.resume }, null, 2));
+        const kept = t.resume.experience.reduce((n, e) => n + e.bullets.length, 0);
+        const all = resume.experience.reduce((n, e) => n + e.bullets.length, 0);
+        console.log(`${id}  ${job.company}: ${job.title}`);
+        console.log(`           ${file}`);
+        console.log(`           ${pages} page${pages === 1 ? "" : "s"}, ${kept} of ${all} bullets, ${t.resume.projects.length} project${t.resume.projects.length === 1 ? "" : "s"}`);
+        if (t.refused.length) console.log(`           Summary kept as yours: the rewrite named things your resume does not (${t.refused.join(", ")})`);
+        else console.log(`           Summary: ${t.resume.summary}`);
+        store.addEvent(id, "tailored", path.basename(file));
+      }
+      console.log("\napply attaches a job's tailored resume automatically.");
+    } finally {
       store.close();
     }
   });

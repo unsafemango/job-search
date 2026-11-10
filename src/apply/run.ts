@@ -9,7 +9,7 @@ import path from "node:path";
 import type { ApplicationState, Store, StoredJob } from "../db.js";
 import { claudeCodeJson, type Runner } from "../model/claude-code.js";
 import { FatalRaterError } from "../model/rating.js";
-import { ROOT } from "../paths.js";
+import { PATHS, ROOT } from "../paths.js";
 import type { Profile } from "../profile/schema.js";
 import { fillForm, openForm, submitForm, type FieldResult, type Session } from "./browser.js";
 import type { FormField } from "./form.js";
@@ -44,7 +44,14 @@ export async function mapWithClaude(job: StoredJob, fields: FormField[], profile
   return { ...checkPlan(plan.data, fields, job, profile), usage };
 }
 
-export function resumeFile(profile: Profile): string | null {
+/** The tailored resume for a job, if `tailor` made one. */
+export function tailoredFile(profile: Profile, jobId: string): string {
+  const name = `${profile.contact.firstName || "My"}_${profile.contact.lastName || "Resume"}_Resume.pdf`.replace(/[^\w.-]+/g, "_");
+  return path.join(PATHS.tailored, jobId, name);
+}
+
+export function resumeFile(profile: Profile, jobId?: string): string | null {
+  if (jobId && existsSync(tailoredFile(profile, jobId))) return tailoredFile(profile, jobId);
   if (!profile.resumePath) return null;
   const file = path.isAbsolute(profile.resumePath) ? profile.resumePath : path.join(ROOT, profile.resumePath);
   return existsSync(file) ? file : null;
@@ -123,7 +130,7 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         record({ state: "skipped", detail: mapped.reason, fields: [], leftOpen: false });
         continue;
       }
-      const results = await fillForm(page, mapped.fields, resume);
+      const results = await fillForm(page, mapped.fields, resumeFile(profile, job.id) ?? resume);
       const problems = [...mapped.problems];
       for (const r of results) if (!r.ok) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
       for (const r of results) if (r.required && !r.shows && !r.wanted) problems.push(`"${r.label}" is required and empty`);
