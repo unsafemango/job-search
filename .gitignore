@@ -4,3 +4,6 @@ node_modules/
 # Everything about you. Only the examples are tracked.
 data/*
 !data/*.example.json
+
+# Local editor and preview settings
+.claude/launch.json

@@ -6,6 +6,7 @@ import { discover, ingest } from "./discover.js";
 import { ageDays } from "./jobs/job.js";
 import { ClaudeCodeRater, claudeCodeJson } from "./model/claude-code.js";
 import { loadConnections, referralsFor } from "./referrals.js";
+import { startDashboard } from "./dashboard.js";
 import { ClaudeRater, isFatal } from "./model/claude.js";
 import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
@@ -298,6 +299,16 @@ program
       }
     }
     console.log("\nNothing was sent. Copy a message to LinkedIn yourself if you want to reach out.");
+  });
+
+program
+  .command("dashboard")
+  .description("Open a local page to approve jobs, see what needs you, and track replies")
+  .option("-p, --port <port>", "port on 127.0.0.1", "4317")
+  .action((opts: { port: string }) => {
+    loadProfile(PATHS.profile);
+    const { url } = startDashboard(() => ({ store: new Store(PATHS.db), profile: loadProfile(PATHS.profile) }), Number(opts.port));
+    console.log(`Dashboard: ${url}\nOnly this computer can open it, and only with that link. Press Ctrl+C to stop.`);
   });
 
 program

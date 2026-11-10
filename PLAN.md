@@ -55,8 +55,8 @@ Useful with no browser automation and no model.
 
 ### Phase 4: dashboard and approval
 
-- [ ] Local web dashboard: today's shortlist, packets to review, needs-you list
-- [ ] Approve, edit or dismiss each packet
+- [x] Local web dashboard: today's shortlist, packets to review, needs-you list (`dashboard`)
+- [x] Approve or dismiss each job; approved jobs are applied to first
 
 ### Phase 5: send
 

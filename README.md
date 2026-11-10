@@ -72,6 +72,7 @@ npm run job -- mark <id> applied --note "Referred by Sam"
 npm run job -- followups                     # applications due a follow-up
 npm run job -- followed-up <id> --note "Emailed the recruiter"
 npm run job -- stats                         # where your search stands
+npm run job -- dashboard                     # a local page to approve jobs and track replies
 ```
 
 ### Applying
@@ -87,6 +88,17 @@ npm run job -- stats                         # where your search stands
 A form is left for you, with the reason, when it needs something the tool must not or cannot do: a sign-in, a CAPTCHA, an emailed code, a signature, a cover letter, or a question your profile doesn't answer. Add the answer to `answers.other` in your profile, and the next run uses it. A job that was sent, or might have been (Submit clicked with no confirmation), is never sent again. Each run respects `apply.maxPerDay` (default 15) and waits `apply.submitGapSeconds` (default 45) between sends. A sent job is marked `applied` in your tracker.
 
 It works on Greenhouse, Lever and Ashby. Workday (used by most banks and large companies) needs an account on each site and is not supported yet; those jobs show their link for you to apply yourself. Ashby saves each field to the employer's server as it's typed, so even a dry run there leaves an unsent draft. Some boards may treat automated browsers with suspicion; the tool does nothing to hide that it's automated.
+
+### Dashboard
+
+`dashboard` prints a link to a page on your own computer with four lists:
+
+- **Today:** your best new matches. **Approve** the ones you want applied to, and **dismiss** the rest. `apply` takes approved jobs first.
+- **Approved:** what's waiting to be applied to.
+- **Needs you:** forms the tool filled but didn't send, with the reason.
+- **Tracking:** applications you've sent, with follow-ups that are due. Mark replies, interviews and offers as they come in.
+
+It listens on 127.0.0.1 only, and every change needs the one-time key in that link, so no website or other device can use it.
 
 ### Tailored resumes
 
