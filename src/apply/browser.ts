@@ -160,6 +160,14 @@ async function fillOne(page: Page, plan: FieldPlan, uploads: Uploads): Promise<s
       if (!picked) await page.keyboard.press("Enter");
       return picked;
     }
+    case "buttons": {
+      // A row of buttons is one question: press the one that was chosen.
+      const i = field.options.indexOf(value);
+      if (i < 0) throw new Error(`no button "${value}"`);
+      const button = page.locator(`[data-ja="${field.id}"][data-ja-opt="${i}"]`).first();
+      if ((await button.getAttribute("aria-pressed")) !== "true") await button.click();
+      return null;
+    }
     case "radio":
     case "checkboxes":
     case "checkbox": {
@@ -185,6 +193,11 @@ async function fillOne(page: Page, plan: FieldPlan, uploads: Uploads): Promise<s
           // The list of places arrives when it arrives; picking from it is what makes the box keep the value.
           await page.locator(SUGGESTIONS).first().waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
           await page.waitForTimeout(300);
+          // No list of places at all means this is an ordinary text box ("city and province you will work in").
+          if ((await page.locator(SUGGESTIONS).count()) === 0) {
+            await box.fill(values[0]!);
+            return null;
+          }
           const picked = await pickOption(page, place).catch(() => null);
           if (picked) return picked;
         }

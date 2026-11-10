@@ -325,3 +325,59 @@ describe("the browser runner, on a local form", () => {
     store2.close();
   }, 90_000);
 });
+
+describe("sponsorship asked the other way round", () => {
+  const authorized = field("f0", "Are you authorized to work in the country where you would perform this role without employer sponsorship?", { kind: "radio", options: ["Yes", "No"], required: true });
+  const plan = (value: string): Plan => ({ verdict: "ready", reason: "", answers: [{ id: "f0", values: [value] }] });
+  it("expects Yes when you are authorized and need no sponsorship, and No is refused", () => {
+    expect(checkPlan(plan("Yes"), [authorized], job, profile).problems).toEqual([]);
+    expect(checkPlan(plan("No"), [authorized], job, profile).problems).toEqual([expect.stringContaining("are authorized to work in Canada without sponsorship"), expect.stringContaining("is required")]);
+  });
+});
+
+/** Questions built the way Ashby builds them: wrapped in data-field-path, required marked on the label's class,
+ * Yes/No as buttons, a checklist of separately named boxes, and one widget the reader cannot read. */
+const ASHBY = `<!doctype html><html><body>
+<form onsubmit="event.preventDefault(); document.body.innerHTML = '<h1>Thank you for applying!</h1>';">
+  <div data-field-path="a"><label class="_heading _required">Your name</label><input id="n" type="text" required></div>
+  <div data-field-path="b"><label class="_heading _required">Do you live and work in the Americas?</label>
+    <div><button type="button" data-option="yes" aria-pressed="false" onclick="[...this.parentElement.querySelectorAll('button')].forEach(b=>b.setAttribute('aria-pressed', String(b===this)))">Yes</button>
+    <button type="button" data-option="no" aria-pressed="false" onclick="[...this.parentElement.querySelectorAll('button')].forEach(b=>b.setAttribute('aria-pressed', String(b===this)))">No</button>
+    <input type="checkbox" tabindex="-1" name="b" style="display:none"></div></div>
+  <div data-field-path="c"><fieldset><label class="_heading _required">Which technologies are you proficient in?</label>
+    <div><input type="checkbox" id="c0" name="JavaScript"><label for="c0">JavaScript</label></div>
+    <div><input type="checkbox" id="c1" name="Go"><label for="c1">Go</label></div>
+    <div><input type="checkbox" id="c2" name="Rust"><label for="c2">Rust</label></div></fieldset></div>
+  <div data-field-path="d"><label class="_heading _required">Pick a start date</label><div class="widget">a custom calendar</div></div>
+  <button type="button">Apply with LinkedIn</button>
+  <button type="submit">Submit application</button>
+</form></body></html>`;
+
+describe("a form built the way Ashby builds them", () => {
+  let session: Session;
+  let url: string;
+  beforeAll(async () => {
+    const file = path.join(dir, "ashby.html");
+    writeFileSync(file, ASHBY);
+    url = `file://${file}`;
+    session = await openSession(path.join(dir, "browser-ashby"), { headless: true });
+  }, 60_000);
+  afterAll(async () => session?.close());
+
+  it("reads Yes/No buttons and checklists as questions, marks required ones, and finds the real submit button", async () => {
+    const { page, dump } = await openForm(session, url);
+    expect(dump.fields.map((f) => [f.kind, f.label, f.required, f.options])).toEqual([
+      ["text", "Your name", true, []],
+      ["buttons", "Do you live and work in the Americas?", true, ["Yes", "No"]],
+      ["checkboxes", "Which technologies are you proficient in?", true, ["JavaScript", "Go", "Rust"]],
+    ]);
+    // A required question with no readable control is reported, so the form is not sent.
+    expect(dump.unread).toEqual(["Pick a start date"]);
+    expect(await page.locator(dump.submit!).innerText()).toBe("Submit application");
+
+    const values = [["Test"], ["Yes"], ["JavaScript", "Go"]];
+    const results = await fillForm(page, dump.fields.map((f, i) => ({ field: f, values: values[i]! })), { resume: { path: resume, name: "R.pdf" } });
+    expect(results.map((r) => [r.ok, r.shows])).toEqual([[true, "Test"], [true, "Yes"], [true, "JavaScript || Go"]]);
+    await page.close();
+  }, 60_000);
+});

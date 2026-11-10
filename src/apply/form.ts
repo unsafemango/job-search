@@ -16,6 +16,8 @@ export type FieldKind =
   | "select"
   | "combobox"
   | "radio"
+  /** Yes/No (or similar) drawn as a row of buttons, as Ashby does. */
+  | "buttons"
   | "checkbox"
   | "checkboxes"
   | "file";
@@ -44,6 +46,8 @@ export type FormDump = {
   hasPassword: boolean;
   /** A selector for the button that sends the form, if one is found. */
   submit: string | null;
+  /** Questions marked required that the reader found no control for. A form with any is not sent. */
+  unread: string[];
 };
 
 /**
@@ -106,6 +110,35 @@ export function dumpForm(): FormDump {
   const fields: FormField[] = [];
   const groups = new Map<string, FormField>();
   let n = 0;
+
+  /** Ashby wraps each question in data-field-path, with the question as its first label. */
+  const entryLabel = (entry: Element): string => clean(text(entry.querySelector("label")));
+  /** Ashby marks a required question with a "_required" class on its label rather than an attribute. */
+  const entryRequired = (el: Element): boolean => {
+    const label = el.closest("[data-field-path]")?.querySelector("label");
+    return !!label && [...label.classList].some((c) => /required/i.test(c));
+  };
+
+  // Yes/No drawn as buttons: one question, its buttons are the options.
+  for (const entry of document.querySelectorAll("[data-field-path]")) {
+    const buttons = [...entry.querySelectorAll<HTMLElement>("button[data-option]")].filter(visible);
+    if (buttons.length < 2) continue;
+    const id = `f${n++}`;
+    buttons.forEach((b, i) => {
+      b.setAttribute("data-ja", id);
+      b.setAttribute("data-ja-opt", String(i));
+    });
+    fields.push({
+      id,
+      kind: "buttons",
+      label: entryLabel(entry),
+      context: clean(text(entry)),
+      required: entryRequired(buttons[0]!),
+      options: buttons.map((b) => clean(text(b))),
+      value: buttons.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => clean(text(b))).join(" || "),
+      hint: entry.getAttribute("data-field-path") ?? "",
+    });
+  }
   const controls = document.querySelectorAll<HTMLElement>("input, select, textarea");
   for (const el of controls) {
     const input = el as HTMLInputElement;
@@ -121,18 +154,22 @@ export function dumpForm(): FormDump {
     if (!isFile && el.tabIndex === -1 && !el.id && !ownLabel(el)) continue;
 
     const own = ownLabel(el);
-    const required = input.required || el.getAttribute("aria-required") === "true" || starred(own);
+    const required = input.required || el.getAttribute("aria-required") === "true" || starred(own) || entryRequired(el);
 
     if (type === "radio" || type === "checkbox") {
-      const key = `${type}:${name || el.id}`;
-      const members = name ? [...document.querySelectorAll<HTMLInputElement>(`input[type=${type}][name="${CSS.escape(name)}"]`)] : [input];
-      let group = name ? groups.get(key) : undefined;
+      // A checklist whose boxes each have their own name is still one question: its wrapper says so.
+      const entry = type === "checkbox" ? el.closest("[data-field-path]") : null;
+      const entryBoxes = entry ? [...entry.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].filter(visible) : [];
+      const asChecklist = entryBoxes.length > 1;
+      const key = asChecklist ? `entry:${entry!.getAttribute("data-field-path")}` : `${type}:${name || el.id}`;
+      const members = asChecklist ? entryBoxes : name ? [...document.querySelectorAll<HTMLInputElement>(`input[type=${type}][name="${CSS.escape(name)}"]`)] : [input];
+      let group = name || asChecklist ? groups.get(key) : undefined;
       if (!group) {
         const id = `f${n++}`;
         const optionLabels = members.map((m) => ownLabel(m));
         const context = contextOf(el, optionLabels, members.length);
-        let question = context;
-        for (const o of optionLabels) if (o) question = question.split(o).join(" ");
+        let question = asChecklist ? entryLabel(entry!) : context;
+        if (!asChecklist) for (const o of optionLabels) if (o) question = question.split(o).join(" ");
         group = {
           id,
           kind: type === "radio" ? "radio" : members.length > 1 ? "checkboxes" : "checkbox",
@@ -179,16 +216,33 @@ export function dumpForm(): FormDump {
     fields.push({ id, kind, label: clean(label), context: clean(context), required: required || starred(context.split("\n")[0] ?? ""), options, value, hint: el.id || input.name || "" });
   }
 
+  // Keep the questions in the order they appear on the page.
+  fields.sort((a, b) => {
+    const x = document.querySelector(`[data-ja="${a.id}"]`);
+    const y = document.querySelector(`[data-ja="${b.id}"]`);
+    return x && y && x !== y ? (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1) : 0;
+  });
+
   const buttons = [...document.querySelectorAll<HTMLElement>("button, input[type=submit]")].filter(visible);
+  const words = (b: HTMLElement): string => (text(b) || (b as HTMLInputElement).value || "").trim();
+  // Never a button that logs in with another site, fills the form from a profile, or dismisses a banner.
+  const usable = buttons.filter((b) => !/linkedin|indeed|apply with|autofill|dismiss|cancel|close|back/i.test(words(b)));
   const submitEl =
-    buttons.find((b) => /submit|send application|apply/i.test(text(b) || (b as HTMLInputElement).value || "")) ??
-    buttons.find((b) => (b as HTMLButtonElement).type === "submit");
+    usable.find((b) => /^(submit|send)( my)?( application)?$/i.test(words(b)) || /submit application|send application/i.test(words(b))) ??
+    usable.find((b) => /submit/i.test(words(b))) ??
+    usable.find((b) => (b as HTMLButtonElement).type === "submit") ??
+    usable.find((b) => /apply/i.test(words(b)));
   if (submitEl) submitEl.setAttribute("data-ja-submit", "1");
 
+  const unread = [...document.querySelectorAll("[data-field-path]")]
+    .filter((e) => entryRequired(e) && !e.querySelector("[data-ja]") && visible(e))
+    .map((e) => entryLabel(e))
+    .filter(Boolean);
   return {
     url: location.href,
     title: document.title,
     fields,
+    unread,
     hasPassword: [...document.querySelectorAll("input[type=password]")].some(visible),
     submit: submitEl ? "[data-ja-submit='1']" : null,
   };
@@ -203,6 +257,11 @@ export function readValues(): Record<string, string> {
     const id = el.getAttribute("data-ja")!;
     const input = el as HTMLInputElement;
     const type = (input.type || "").toLowerCase();
+    if (el.tagName === "BUTTON") {
+      if (el.getAttribute("aria-pressed") === "true") out[id] = out[id] ? `${out[id]} || ${text(el)}` : text(el);
+      else out[id] ??= "";
+      continue;
+    }
     if (type === "radio" || type === "checkbox") {
       if (input.checked) {
         const label = text(input.labels?.[0]) || input.getAttribute("aria-label") || "on";

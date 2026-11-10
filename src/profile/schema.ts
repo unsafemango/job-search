@@ -53,6 +53,8 @@ export const ProfileSchema = z.object({
       region: z.string().default(""),
       country: z.string().default(""),
       postalCode: z.string().default(""),
+      /** Full mailing address, for forms that ask for one. */
+      address: z.string().default(""),
       linkedin: z.string().default(""),
       website: z.string().default(""),
       github: z.string().default(""),

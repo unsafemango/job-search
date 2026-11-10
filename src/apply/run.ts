@@ -179,6 +179,8 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       };
 
       const questions = dump.fields.filter(isQuestion).map((f) => f.label);
+      // A required question the reader could not read cannot be answered, so the form is not sent.
+      const unread = dump.unread.map((q) => `a required question could not be read: "${q.slice(0, 80)}"`);
       const mapped = await map(job, dump.fields, profile, store.recall(questions), cover);
       if (coverField?.required && !cover) mapped.problems.push("the form needs a cover letter, and none could be written that your facts support");
       if (mapped.verdict === "skip") {
@@ -191,7 +193,7 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         if (isLocationField(plan.field) && plan.values.length) plan.values = [...plan.values, ...profile.contact.fallbackLocations];
       }
       const results = await fillForm(page, mapped.fields, uploads);
-      const problems = [...mapped.problems];
+      const problems = [...mapped.problems, ...unread];
       // A field you did not have to fill, left empty by the page, is not worth holding the application for;
       // one that shows a different value than wanted is.
       for (const r of results) if (!r.ok && (r.required || r.shows)) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);

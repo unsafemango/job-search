@@ -104,6 +104,8 @@ export function isCoverField(f: FormField): boolean {
 }
 
 const SPONSOR = /sponsor/i;
+/** "Are you authorized to work here without sponsorship?": Yes when you are, the opposite of "will you require sponsorship?". */
+const AUTHORIZED_WITHOUT_SPONSORSHIP = /authori[sz]ed[^.?]*without[^.?]*sponsor|without[^.?]*sponsor[^.?]*authori[sz]ed/i;
 const AUTHORIZED = /(legally )?(authori[sz]ed|entitled|eligible|permitted)\b.*\bwork|right to work|work authori[sz]ation/i;
 const SIGNATURE = /signature|e-?sign|sign (your|here)|type your (full )?(legal )?name to|by typing your name/i;
 const YES = /^(yes|y|true)\b/i;
@@ -159,7 +161,14 @@ export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Pr
     }
 
     const yesNo = values.length === 1 && (YES.test(values[0]!) || NO.test(values[0]!));
-    if (yesNo && SPONSOR.test(question)) {
+    if (yesNo && AUTHORIZED_WITHOUT_SPONSORSHIP.test(question)) {
+      const country = countryFor(question, job, profile);
+      const ok = profile.answers.authorizedCountries.some((c) => c.toLowerCase() === country.toLowerCase()) && !(profile.answers.needsSponsorship[country] ?? true);
+      if (YES.test(values[0]!) !== ok) {
+        problems.push(`"${field.label}": the profile says you ${ok ? "are" : "are not"} authorized to work in ${country} without sponsorship, but the answer was "${values[0]}"`);
+        values = [];
+      }
+    } else if (yesNo && SPONSOR.test(question)) {
       const country = countryFor(question, job, profile);
       const needs = profile.answers.needsSponsorship[country] ?? true;
       if (YES.test(values[0]!) !== needs) {
