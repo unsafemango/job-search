@@ -109,6 +109,10 @@ In Claude Code, type `/inbox`. Claude searches your connected mail, read-only an
 
 Every score is stored with its four parts (title, skills or model fit, location, recency). Once you've sent at least 20 applications, with at least 5 positive replies and 5 without, `learn` compares the two groups and moves weight toward the parts that predicted a reply. Each weight can move at most 1.5x up or 0.5x down, and the four still sum to 100. `learn --save` writes them to your profile as `scoreWeights`, and the next `discover` rescores. Delete `scoreWeights` to go back to the defaults.
 
+### Written answers
+
+When a form has a written question (why this role, experience with a tool, bullets showing ability), `apply` writes the answer in your voice (`data/voice.md`) from your resume, facts and standing answers only. Every number and named thing in it is checked against those facts, and an answer that names something they don't hold is dropped and the form is left for you. Questions that need your own view (consent, preferences) are answered from `answers.other`, so you decide once.
+
 ### Daily automatic applying
 
 `daily` applies to the jobs a separate daily job-finder saves each morning (here, a Claude routine that posts 10 jobs, each with its own resume and cover letter PDFs, to a Weekly Rhythm page). The `/daily` skill, run by a scheduled task, does the whole thing:

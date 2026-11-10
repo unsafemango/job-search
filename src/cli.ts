@@ -410,7 +410,8 @@ program
         filesDir,
         count,
         submit: !!opts.submit,
-        headless: !!opts.headless,
+        // With a hidden window, or no terminal to wait in, nobody can pass a robot check: it is left for you.
+        headless: !!opts.headless || !process.stdin.isTTY,
         topUp: opts.topUp,
         refresh: opts.discover
           ? async () => {

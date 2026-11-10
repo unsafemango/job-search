@@ -335,6 +335,22 @@ describe("sponsorship asked the other way round", () => {
   });
 });
 
+describe("written answers", () => {
+  const why = field("f0", "In 3-5 sentences, please explain why you are interested in this role?", { kind: "textarea", required: true });
+  const plan = (text: string): Plan => ({ verdict: "ready", reason: "", answers: [{ id: "f0", values: [text] }] });
+  const facts = "Built a multi-tenant dashboard with React and PostgreSQL. 5+ years of experience.";
+  it("keeps an answer that only says what the facts say, and drops an em dash", () => {
+    const r = checkPlan(plan("I've built dashboards with React and PostgreSQL for 5 years — mostly for Acme."), [why], job, profile, undefined, facts);
+    expect(r.problems).toEqual([]);
+    expect(r.fields[0]!.values).toEqual(["I've built dashboards with React and PostgreSQL for 5 years, mostly for Acme."]);
+  });
+  it("refuses an answer that names things the facts do not hold, so the form is left for you", () => {
+    const r = checkPlan(plan("I led a Rust team at Google for 12 years."), [why], job, profile, undefined, facts);
+    expect(r.problems).toEqual([expect.stringContaining("named things your facts do not support"), expect.stringContaining("is required")]);
+    expect(r.fields[0]!.values).toEqual([]);
+  });
+});
+
 /** Questions built the way Ashby builds them: wrapped in data-field-path, required marked on the label's class,
  * Yes/No as buttons, a checklist of separately named boxes, and one widget the reader cannot read. */
 const ASHBY = `<!doctype html><html><body>
@@ -363,6 +379,14 @@ describe("a form built the way Ashby builds them", () => {
     session = await openSession(path.join(dir, "browser-ashby"), { headless: true });
   }, 60_000);
   afterAll(async () => session?.close());
+
+  it("reads the question of a dropdown whose own label is only its choices", async () => {
+    const file = path.join(dir, "lever-select.html");
+    writeFileSync(file, `<!doctype html><html><body><form><ul><li class="application-question"><div><div class="application-label">Are you based in Canada?<span>✱</span></div><div class="application-field required-field"><div class="application-dropdown"><select required><option value="">Select...</option><option>Yes</option><option>No</option></select></div></div></div></li></ul><button type="submit">Submit application</button></form></body></html>`);
+    const { page, dump } = await openForm(session, `file://${file}`);
+    expect(dump.fields.map((f) => [f.kind, f.label, f.required, f.options])).toEqual([["select", "Are you based in Canada?", true, ["Yes", "No"]]]);
+    await page.close();
+  }, 60_000);
 
   it("reads Yes/No buttons and checklists as questions, marks required ones, and finds the real submit button", async () => {
     const { page, dump } = await openForm(session, url);

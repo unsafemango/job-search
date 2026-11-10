@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { Job } from "../jobs/job.js";
 import type { Usage } from "../model/rating.js";
 import type { Profile } from "../profile/schema.js";
+import { unsupportedClaims } from "../resume/tailor.js";
 import type { FormField } from "./form.js";
 
 export const PlanSchema = z.object({
@@ -51,7 +52,8 @@ How to fill:
 - Location fields get the candidate's city, region and country. Phone fields get the phone as given.
 - Salary questions: use the standing answer for the job's level (senior for senior/lead titles, mid otherwise), as a plain number or a short range from it.
 - "How did you hear about us": the standing answer, or the closest option.
-- Optional free-text questions (why this company, anything else) stay empty, unless a remembered answer fits. A required one gets two or three plain, specific sentences drawn only from the facts and the posting.
+- Optional free-text questions (why this company, anything else) stay empty, unless a remembered answer fits.
+- A required written question (why this role, experience with a tool, bullets showing ability) gets a short answer written in the candidate's own voice, described below the facts. Draw it only from the facts: never claim a skill, tool, employer, number, title or result the facts do not state. If the facts cannot answer it honestly, leave it empty and set verdict to "needs_review". A required one gets two or three plain, specific sentences drawn only from the facts and the posting.
 - Leave optional fields empty when the facts do not cover them.
 
 Return every field id once, in "answers", with its values (empty array to leave it alone).`;
@@ -69,7 +71,7 @@ export function factsFor(profile: Profile) {
 
 export type Remembered = { question: string; answer: string };
 
-export function promptFor(job: Job, fields: FormField[], profile: Profile, memory: Remembered[] = []): string {
+export function promptFor(job: Job, fields: FormField[], profile: Profile, memory: Remembered[] = [], voice = "", knownFacts: string[] = []): string {
   const form = fields.map((f) => ({
     id: f.id,
     kind: f.kind,
@@ -92,6 +94,12 @@ export function promptFor(job: Job, fields: FormField[], profile: Profile, memor
           JSON.stringify(memory, null, 1),
           "",
         ]
+      : []),
+    ...(knownFacts.length && fields.some((f) => f.kind === "textarea")
+      ? ["More facts about the candidate, for written answers (all true; use only these and the above):", ...knownFacts.map((f) => `- ${f}`), ""]
+      : []),
+    ...(voice && fields.some((f) => f.kind === "textarea")
+      ? ["How the candidate writes (for any written answer):", voice, ""]
       : []),
     "The form's fields:",
     JSON.stringify(form, null, 1),
@@ -132,7 +140,7 @@ export function matchOption(value: string, options: string[]): string | null {
 /** A cover letter field and what goes in it: ["cover_letter"] for a file box, the letter's text for a text box. */
 export type CoverAnswer = { id: string; values: string[] };
 
-export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Profile, cover?: CoverAnswer): Omit<MappedForm, "usage"> {
+export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Profile, cover?: CoverAnswer, facts?: string): Omit<MappedForm, "usage"> {
   const byId = new Map(plan.answers.map((a) => [a.id, a.values.map((v) => v.trim()).filter(Boolean)]));
   const problems: string[] = [];
   const out: FieldPlan[] = [];
@@ -154,6 +162,16 @@ export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Pr
     // The cover letter is the tool's own, written and checked against your facts; Claude does not fill it.
     if (cover && field.id === cover.id) values = cover.values;
     else if (isCoverField(field)) values = [];
+
+    // A written answer may only say what the facts say: any number or named thing they do not hold, and it is not sent.
+    if (facts && values.length && (field.kind === "textarea" || (field.kind === "text" && values[0]!.length > 80))) {
+      const text = values[0]!.replace(/\s*—\s*/g, ", ");
+      const bad = unsupportedClaims(text, `${facts}\n${job.company}\n${job.title}\n${field.label}\n${field.options.join(" ")}`);
+      if (bad.length) {
+        problems.push(`"${field.label.slice(0, 70)}": the answer named things your facts do not support (${bad.slice(0, 5).join(", ")})`);
+        values = [];
+      } else values = [text];
+    }
 
     if (SIGNATURE.test(question) && values.length) {
       problems.push(`"${field.label}" asks for a signature, which is left for you`);

@@ -10,6 +10,8 @@ import type { ApplicationState, Store, StoredJob } from "../db.js";
 import { claudeCodeJson, type Runner } from "../model/claude-code.js";
 import { FatalRaterError } from "../model/rating.js";
 import { PATHS, ROOT } from "../paths.js";
+import { loadResume, sourceText } from "../resume/schema.js";
+import { loadVoice } from "../resume/tailor.js";
 import type { Profile } from "../profile/schema.js";
 import { coverLetterName, coverLetterText, deleteDocuments, existingDocuments, prepareDocuments, resumeName } from "../resume/documents.js";
 import { fillForm, isLocationField, openForm, submitForm, type FieldResult, type Session, type Uploads } from "./browser.js";
@@ -54,6 +56,27 @@ export type JobDocuments = {
 
 export type JobOutcome = { job: StoredJob; state: ApplicationState; detail: string; fields: FieldResult[]; leftOpen: boolean };
 
+/** Lines from your resume data for written answers: the extra facts, each job, and your tools. */
+export function resumeFacts(): string[] {
+  try {
+    const r = loadResume(PATHS.resumeData);
+    return [...r.facts, ...r.experience.map((e) => `${e.title} at ${e.company} (${e.dates})`), ...r.skills.map((s) => `${s.group}: ${s.items.join(", ")}`)];
+  } catch {
+    return [];
+  }
+}
+
+/** Everything true about you that a written answer may draw on: the resume and its facts, the profile and its answers. */
+export function factsText(profile: Profile): string {
+  let resume = "";
+  try {
+    resume = sourceText(loadResume(PATHS.resumeData));
+  } catch {
+    // No resume data: only the profile counts.
+  }
+  return [resume, profile.background, JSON.stringify(profile.contact), JSON.stringify(profile.answers), profile.skills.join(" ")].join("\n");
+}
+
 /** Asks Claude Code what goes in each field, then checks the answer in code. */
 export async function mapWithClaude(
   job: StoredJob,
@@ -63,18 +86,19 @@ export async function mapWithClaude(
   cover?: CoverAnswer,
   run?: Runner,
 ): Promise<MappedForm> {
+  const written = fields.some((f) => f.kind === "textarea");
   const { value, usage } = await claudeCodeJson({
     command: profile.rating.command,
     model: profile.apply.model,
     effort: profile.apply.effort,
     system: SYSTEM,
-    prompt: promptFor(job, fields, profile, memory),
+    prompt: promptFor(job, fields, profile, memory, written ? loadVoice(PATHS.voice) : "", written ? resumeFacts() : []),
     schema: planJsonSchema(),
     run,
   });
   const plan = PlanSchema.safeParse(value);
   if (!plan.success) throw new Error("Claude's answer for this form could not be read");
-  return { ...checkPlan(plan.data, fields, job, profile, cover), usage };
+  return { ...checkPlan(plan.data, fields, job, profile, cover, factsText(profile)), usage };
 }
 
 /** Your own resume file, from the profile. */

@@ -99,6 +99,8 @@ export const ProfileSchema = z.object({
           gender: z.string().default(""),
           pronouns: z.string().default(""),
           race: z.string().default(""),
+          /** "Yes" or "No" for forms that ask this separately from race. */
+          hispanicLatino: z.string().default(""),
           sexualOrientation: z.string().default(""),
           disability: z.string().default(""),
           veteran: z.string().default(""),

@@ -211,8 +211,14 @@ export function dumpForm(): FormDump {
         : isFile
           ? String(input.files?.length ?? 0)
           : input.value;
-    const context = contextOf(el, [own]);
-    const label = own && !PLACEHOLDER.test(own.trim()) ? own : context;
+    // A dropdown's own label can be just its choices ("Select... Yes No"); the question is around it.
+    const optionNoise = (t: string): string => [...options].reduce((s, o) => s.split(o).join(" "), t).replace(/select\.*|choose\.*|--/gi, " ").replace(/[\s*✱.]+/g, " ").trim();
+    const ownIsChoices = kind === "select" && optionNoise(own).length < 3;
+    const context = contextOf(el, ownIsChoices ? [own, ...options] : [own]);
+    // The question without the choices drawn under it ("Are you based in Canada? Select... Yes No").
+    const withoutChoices = (t: string): string =>
+      [...options].reduce((s, o) => s.replace(new RegExp(`(?<![A-Za-z0-9])${o.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`, "g"), " "), t).replace(/select\.{2,3}|choose\.{2,3}/gi, " ");
+    const label = own && !PLACEHOLDER.test(own.trim()) && !ownIsChoices ? own : ownIsChoices ? withoutChoices(context) : context;
     fields.push({ id, kind, label: clean(label), context: clean(context), required: required || starred(context.split("\n")[0] ?? ""), options, value, hint: el.id || input.name || "" });
   }
 
