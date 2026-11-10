@@ -12,7 +12,9 @@ export const WEIGHTS = { title: 35, skills: 35, location: 20, recency: 10 } as c
 /** This many of your skills named in a posting counts as a full match. */
 const SKILLS_FOR_FULL_MATCH = 5;
 
-export type Score = { score: number; reasons: string[] };
+/** Each part of the score, 0 to 1, before weighting. `learn` compares these between jobs that got replies and jobs that did not. */
+export type ScoreParts = { title: number; skills: number; location: number; recency: number };
+export type Score = { score: number; reasons: string[]; parts: ScoreParts };
 
 export function scoreJob(job: Job, profile: Profile, now = new Date(), rating?: Rating | null): Score {
   const reasons: string[] = [];
@@ -49,7 +51,9 @@ export function scoreJob(job: Job, profile: Profile, now = new Date(), rating?: 
   const recencyPart = age === null ? 0.5 : Math.max(0, 1 - age / profile.maxPostingAgeDays);
   if (age !== null) reasons.push(age === 0 ? "posted today" : `posted ${age} day${age === 1 ? "" : "s"} ago`);
 
-  const score =
-    WEIGHTS.title * titlePart + WEIGHTS.skills * skillsPart + WEIGHTS.location * locationPart + WEIGHTS.recency * recencyPart;
-  return { score: Math.round(score), reasons };
+  // Weights learned from your outcomes (`learn`) replace the defaults once there are enough.
+  const w = profile.scoreWeights ?? WEIGHTS;
+  const score = w.title * titlePart + w.skills * skillsPart + w.location * locationPart + w.recency * recencyPart;
+  const parts = { title: titlePart, skills: skillsPart, location: locationPart, recency: recencyPart };
+  return { score: Math.round(Math.min(100, Math.max(0, score))), reasons, parts };
 }

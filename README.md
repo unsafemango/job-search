@@ -73,6 +73,8 @@ npm run job -- followups                     # applications due a follow-up
 npm run job -- followed-up <id> --note "Emailed the recruiter"
 npm run job -- stats                         # where your search stands
 npm run job -- dashboard                     # a local page to approve jobs and track replies
+npm run job -- inbox replies.json --apply    # update statuses from replies (see /inbox)
+npm run job -- learn --save                  # tune score weights from your outcomes
 ```
 
 ### Applying
@@ -99,6 +101,12 @@ It works on Greenhouse, Lever and Ashby. Workday (used by most banks and large c
 - **Tracking:** applications you've sent, with follow-ups that are due. Mark replies, interviews and offers as they come in.
 
 It listens on 127.0.0.1 only, and every change needs the one-time key in that link, so no website or other device can use it.
+
+### Learning from replies
+
+In Claude Code, type `/inbox`. Claude searches your connected mail, read-only and using only senders, subjects and previews, for replies from the companies you applied to. It saves them to `data/inbox.json` and runs `inbox`, which works out in code which job each email is about (by sender name, domain or acronym) and what it means: receipt, rejection, interview, offer, or another reply. It proposes the status changes, and makes them only after you say yes (`--apply`). News never goes backwards. You can also write the JSON list yourself: `[{ "from": "...", "subject": "...", "snippet": "..." }]`.
+
+Every score is stored with its four parts (title, skills or model fit, location, recency). Once you've sent at least 20 applications, with at least 5 positive replies and 5 without, `learn` compares the two groups and moves weight toward the parts that predicted a reply. Each weight can move at most 1.5x up or 0.5x down, and the four still sum to 100. `learn --save` writes them to your profile as `scoreWeights`, and the next `discover` rescores. Delete `scoreWeights` to go back to the defaults.
 
 ### Tailored resumes
 
@@ -223,6 +231,10 @@ src/
   db.ts           the SQLite store
   model/          the rating shape, the local Claude Code and API providers, pricing
   apply/          reading, mapping, filling and sending application forms
+  resume/         resume data, tailoring with a truth check, PDF rendering
+  dashboard.ts    the local review page
+  learn.ts        learned weights and reading replies
+  referrals.ts    people you know at a company
   profile/        the profile schema (zod)
   sources/        job boards, GitHub lists, Workday and CSV import
   jobs/           the job shape, filters and scoring
@@ -234,11 +246,10 @@ data/             your files (git-ignored; examples are tracked)
 
 See [PLAN.md](PLAN.md) for the full plan. Next up:
 
-- Tailored one-page resumes, with every claim checked against your profile
-- A local review dashboard
-- Assisted form filling, where you approve every submission
+- Workday applications (accounts and multi-page forms)
+- A weekly check that each board's form still fills
 
-The tool will never send applications unattended, get around bot detection or CAPTCHAs, or write anything on a form that your profile doesn't support.
+The tool never sends an application unless you ran it with `--submit`, never gets around bot detection or CAPTCHAs, and never writes anything on a form that your profile doesn't support.
 
 ## Acknowledgements
 

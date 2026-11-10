@@ -7,6 +7,8 @@ import { ageDays } from "./jobs/job.js";
 import { ClaudeCodeRater, claudeCodeJson } from "./model/claude-code.js";
 import { loadConnections, referralsFor } from "./referrals.js";
 import { startDashboard } from "./dashboard.js";
+import { classifyEmail, isProgress, learnWeights, type Email } from "./learn.js";
+import { WEIGHTS } from "./jobs/score.js";
 import { ClaudeRater, isFatal } from "./model/claude.js";
 import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
@@ -309,6 +311,60 @@ program
     loadProfile(PATHS.profile);
     const { url } = startDashboard(() => ({ store: new Store(PATHS.db), profile: loadProfile(PATHS.profile) }), Number(opts.port));
     console.log(`Dashboard: ${url}\nOnly this computer can open it, and only with that link. Press Ctrl+C to stop.`);
+  });
+
+program
+  .command("learn")
+  .description("Compare jobs that got replies with those that did not, and suggest score weights; --save uses them")
+  .option("--save", "write the learned weights to your profile (only once there are enough outcomes)")
+  .action((opts: { save?: boolean }) => {
+    const profile = loadProfile(PATHS.profile);
+    const store = new Store(PATHS.db);
+    const l = learnWeights(store.outcomes(), profile.scoreWeights ?? { ...WEIGHTS });
+    store.close();
+    console.log(`${l.sent} sent applications with a score breakdown, ${l.positive} with a positive reply.`);
+    if (l.sent) {
+      console.log("\npart       replied  no reply   weight  learned");
+      for (const p of l.parts) {
+        console.log(`${p.part.padEnd(10)} ${p.positive.toFixed(2).padStart(7)}  ${p.negative.toFixed(2).padStart(8)}  ${String(p.weight).padStart(7)}  ${String(p.learned).padStart(7)}`);
+      }
+    }
+    if (!l.ready) return console.log(`\nNot learning yet: ${l.why}.`);
+    if (!opts.save) return console.log("\nRun with --save to use the learned weights, then discover to rescore.");
+    const raw = JSON.parse(readFileSync(PATHS.profile, "utf8"));
+    raw.scoreWeights = l.weights;
+    writeFileSync(PATHS.profile, JSON.stringify(raw, null, 2) + "\n");
+    console.log(`\nSaved to ${PATHS.profile} as scoreWeights. Run discover to rescore your jobs. Delete scoreWeights to go back to the defaults.`);
+  });
+
+program
+  .command("inbox <emails.json>")
+  .description("Read replies (a JSON list of {from, subject, snippet, date}) and propose status changes; --apply makes them")
+  .option("--apply", "make the proposed changes")
+  .action((file: string, opts: { apply?: boolean }) => {
+    const emails = JSON.parse(readFileSync(file, "utf8")) as Email[];
+    if (!Array.isArray(emails)) throw new Error(`${file} must hold a JSON list of emails.`);
+    const store = new Store(PATHS.db);
+    try {
+      const tracked = (["applied", "replied", "interview", "offer"] as const).flatMap((s) => store.list(s, 1000));
+      let changes = 0;
+      for (const c of emails.map((e) => classifyEmail(e, tracked))) {
+        if (!c.job) continue;
+        const change = c.status && isProgress(c.job.status, c.status) ? c.status : null;
+        console.log(`${c.job.id}  ${c.job.company}: ${c.job.title}\n           "${c.email.subject}" looks like ${c.label}${change ? `: ${c.job.status} -> ${change}` : ""}`);
+        if (change) {
+          changes++;
+          if (opts.apply) {
+            store.setStatus(c.job.id, change, `from email: ${c.email.subject.slice(0, 120)}`);
+            c.job.status = change;
+          }
+        }
+      }
+      if (!changes) console.log("No status changes.");
+      else console.log(opts.apply ? `\nMade ${changes} change(s).` : `\n${changes} change(s) proposed. Run again with --apply to make them.`);
+    } finally {
+      store.close();
+    }
   });
 
 program

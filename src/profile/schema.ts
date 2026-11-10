@@ -117,6 +117,13 @@ export const ProfileSchema = z.object({
       maxPerDay: z.number().int().positive().default(15),
     })
     .prefault({}),
+  /**
+   * Score weights learned from your outcomes by `learn` (they sum to 100).
+   * Leave unset for the defaults: title 35, skills 35, location 20, recency 10.
+   */
+  scoreWeights: z
+    .object({ title: z.number().min(0), skills: z.number().min(0), location: z.number().min(0), recency: z.number().min(0) })
+    .optional(),
   /** How `rate` uses a model to judge fit. */
   rating: z
     .object({

@@ -25,8 +25,8 @@ export function ingest(jobs: Job[], profile: Profile, store: Store, now = new Da
     const filteredReason = filterJob(job, profile, now);
     // A rating made earlier still counts while the posting and your profile are unchanged.
     const rating = filteredReason ? null : store.rating(ratingKey(job, profile, profile.rating.model));
-    const { score, reasons } = filteredReason ? { score: 0, reasons: [] } : scoreJob(job, profile, now, rating);
-    const isNew = store.upsert(job, { level: jobLevel(job), score, reasons, filteredReason }, now);
+    const { score, reasons, parts } = filteredReason ? { score: 0, reasons: [], parts: undefined } : scoreJob(job, profile, now, rating);
+    const isNew = store.upsert(job, { level: jobLevel(job), score, reasons, filteredReason, parts }, now);
     if (filteredReason) continue;
     if (store.isHiddenDuplicate(job.id)) {
       out.duplicates++;

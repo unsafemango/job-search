@@ -6,6 +6,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dedupeKey, type Job } from "./jobs/job.js";
+import type { ScoreParts } from "./jobs/score.js";
 import type { Rating, Usage } from "./model/rating.js";
 
 export const STATUSES = ["new", "shortlisted", "applied", "replied", "interview", "offer", "rejected", "dismissed"] as const;
@@ -179,6 +180,7 @@ export class Store {
     }
     this.db.exec("CREATE INDEX IF NOT EXISTS jobs_by_dedupe_key ON jobs (dedupe_key)");
     if (!columns.includes("apply_url")) this.db.exec("ALTER TABLE jobs ADD COLUMN apply_url TEXT");
+    if (!columns.includes("parts")) this.db.exec("ALTER TABLE jobs ADD COLUMN parts TEXT");
   }
 
   close(): void {
@@ -186,15 +188,15 @@ export class Store {
   }
 
   /** Adds a job or refreshes it. Your status and the date it was first seen are kept. Returns true when it is new. */
-  upsert(job: Job, rated: { level: string; score: number; reasons: string[]; filteredReason: string | null }, now = new Date()): boolean {
+  upsert(job: Job, rated: { level: string; score: number; reasons: string[]; filteredReason: string | null; parts?: ScoreParts }, now = new Date()): boolean {
     const isNew = !this.db.prepare("SELECT 1 FROM jobs WHERE id = ?").get(job.id);
     const at = now.toISOString();
     this.db
       .prepare(
-        `INSERT INTO jobs (id, source, company, title, url, locations, remote, posted_at, description, level, score, reasons, filtered_reason, first_seen, last_seen, dedupe_key, apply_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO jobs (id, source, company, title, url, locations, remote, posted_at, description, level, score, reasons, filtered_reason, first_seen, last_seen, dedupe_key, apply_url, parts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
-           dedupe_key = excluded.dedupe_key, apply_url = excluded.apply_url,
+           dedupe_key = excluded.dedupe_key, apply_url = excluded.apply_url, parts = COALESCE(excluded.parts, parts),
            company = excluded.company, title = excluded.title, url = excluded.url, locations = excluded.locations,
            remote = excluded.remote, posted_at = excluded.posted_at, description = excluded.description,
            level = excluded.level, score = excluded.score, reasons = excluded.reasons,
@@ -205,6 +207,7 @@ export class Store {
         job.postedAt, job.description, rated.level, rated.score, JSON.stringify(rated.reasons), rated.filteredReason, at, at,
         dedupeKey(job),
         job.applyUrl ?? null,
+        rated.parts ? JSON.stringify(rated.parts) : null,
       );
     if (isNew) this.addEvent(job.id, "seen", "", now);
     return isNew;
@@ -387,8 +390,18 @@ export class Store {
       .map(fromRow);
   }
 
-  setScore(id: string, score: number, reasons: string[]): void {
-    this.db.prepare("UPDATE jobs SET score = ?, reasons = ? WHERE id = ?").run(score, JSON.stringify(reasons), id);
+  setScore(id: string, score: number, reasons: string[], parts?: ScoreParts): void {
+    this.db
+      .prepare("UPDATE jobs SET score = ?, reasons = ?, parts = COALESCE(?, parts) WHERE id = ?")
+      .run(score, JSON.stringify(reasons), parts ? JSON.stringify(parts) : null, id);
+  }
+
+  /** Sent applications with their score parts and whether they got a positive reply, for `learn`. */
+  outcomes(): { id: string; status: Status; parts: ScoreParts; positive: boolean }[] {
+    const rows = this.db
+      .prepare("SELECT id, status, parts FROM jobs WHERE status IN ('applied', 'replied', 'interview', 'offer', 'rejected') AND parts IS NOT NULL")
+      .all() as { id: string; status: Status; parts: string }[];
+    return rows.map((r) => ({ id: r.id, status: r.status, parts: JSON.parse(r.parts) as ScoreParts, positive: ["replied", "interview", "offer"].includes(r.status) }));
   }
 
   /** How many kept jobs are in each status, without duplicates. */

@@ -84,8 +84,8 @@ export async function rateJobs(store: Store, profile: Profile, rater: Rater, opt
     }
     failuresInARow = 0;
     store.saveRating(ratingKey(job, profile, rater.model), job.id, outcome.model, outcome.rating, outcome.usage, outcome.costUsd, now);
-    const { score, reasons } = scoreJob(job, profile, now, outcome.rating);
-    store.setScore(job.id, score, reasons);
+    const { score, reasons, parts } = scoreJob(job, profile, now, outcome.rating);
+    store.setScore(job.id, score, reasons, parts);
     store.addEvent(job.id, "rated", `fit ${outcome.rating.fit} by ${outcome.model}`, now);
     result.rated++;
     log(`  ${job.id}  ${String(outcome.rating.fit).padStart(3)}  ${job.company}: ${job.title}`);

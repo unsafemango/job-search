@@ -71,8 +71,8 @@ Useful with no browser automation and no model.
 
 ### Phase 6: learn
 
-- [ ] Read-only Gmail status detection (optional)
-- [ ] Re-weight scoring from recorded outcomes once there are enough
+- [x] Read-only reply detection: `inbox` rules in code, fed by the `/inbox` Claude Code skill through your connected mail
+- [x] Re-weight scoring from recorded outcomes once there are enough (`learn`)
 
 ## Deliberately not built
 
