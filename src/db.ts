@@ -23,6 +23,18 @@ export type StoredJob = Job & {
 
 export type JobEvent = { at: string; kind: string; note: string };
 
+/** An application still waiting on a reply, and how long it has waited. */
+export type FollowUp = {
+  job: StoredJob;
+  /** When you applied or last followed up, whichever is later. */
+  since: string;
+  days: number;
+  /** How many times you have followed up already. */
+  followUps: number;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
@@ -133,6 +145,39 @@ export class Store {
 
   events(id: string): JobEvent[] {
     return this.db.prepare("SELECT at, kind, note FROM events WHERE job_id = ? ORDER BY id").all(id) as JobEvent[];
+  }
+
+  /** Records that you followed up on an application. Its status stays the same; the wait starts again. */
+  followedUp(id: string, note = "", now = new Date()): void {
+    if (!this.get(id)) throw new Error(`No job with id ${id}.`);
+    this.addEvent(id, "followed_up", note, now);
+  }
+
+  /**
+   * Applications with no reply where at least `afterDays` have passed since you
+   * applied or last followed up, longest wait first. A job you applied to stays
+   * here even if a later discover drops it (for example, because the posting is
+   * now too old).
+   */
+  followUps(afterDays: number, now = new Date()): FollowUp[] {
+    const rows = this.db
+      .prepare(
+        `SELECT j.*,
+           (SELECT MAX(at) FROM events e WHERE e.job_id = j.id AND e.kind IN ('applied', 'followed_up')) AS since,
+           (SELECT COUNT(*) FROM events e WHERE e.job_id = j.id AND e.kind = 'followed_up') AS follow_ups
+         FROM jobs j WHERE j.status = 'applied'`,
+      )
+      .all() as Record<string, any>[];
+    return rows
+      .filter((r) => r.since)
+      .map((r) => ({
+        job: fromRow(r),
+        since: r.since as string,
+        days: Math.floor((now.getTime() - new Date(r.since).getTime()) / DAY_MS),
+        followUps: Number(r.follow_ups),
+      }))
+      .filter((f) => f.days >= afterDays)
+      .sort((a, b) => b.days - a.days || b.job.score - a.job.score);
   }
 
   /** How many kept jobs are in each status. */

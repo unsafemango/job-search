@@ -34,6 +34,8 @@ export const ProfileSchema = z.object({
   skills: z.array(z.string().min(1)).default([]),
   excludeCompanies: z.array(z.string()).default([]),
   maxPostingAgeDays: z.number().int().positive().default(45),
+  /** An application with no reply is due a follow-up this many days after you applied or last followed up. */
+  followUpAfterDays: z.number().int().positive().default(7),
 });
 
 export type Profile = z.infer<typeof ProfileSchema>;

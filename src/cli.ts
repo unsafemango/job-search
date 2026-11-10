@@ -101,6 +101,39 @@ program
   });
 
 program
+  .command("followups")
+  .description("Show applications with no reply that are due a follow-up")
+  .option("-d, --days <n>", "days to wait before following up (default: followUpAfterDays in your profile)")
+  .action((opts: { days?: string }) => {
+    const afterDays = opts.days === undefined ? loadProfile(PATHS.profile).followUpAfterDays : Number(opts.days);
+    if (!Number.isInteger(afterDays) || afterDays < 0) throw new Error(`--days must be a whole number, not "${opts.days}".`);
+    const store = new Store(PATHS.db);
+    const due = store.followUps(afterDays);
+    if (!due.length) console.log(`No applications have waited ${afterDays}+ days without a reply.`);
+    for (const f of due) {
+      const what = f.followUps === 0 ? "applied" : `followed up (${f.followUps}x)`;
+      console.log(`${f.job.id}  ${f.job.company}: ${f.job.title}\n               ${what} ${f.days}d ago`);
+    }
+    if (due.length) {
+      console.log(`\nAfter you follow up:   npm run job -- followed-up <id>`);
+      console.log(`If they replied:       npm run job -- mark <id> replied`);
+    }
+    store.close();
+  });
+
+program
+  .command("followed-up <id>")
+  .description("Record that you followed up on an application; the wait starts again")
+  .option("--note <text>", "a note to keep with it", "")
+  .action((id: string, opts: { note: string }) => {
+    const store = new Store(PATHS.db);
+    store.followedUp(id, opts.note);
+    const job = store.get(id)!;
+    console.log(`Recorded a follow-up for ${job.company}: ${job.title}.`);
+    store.close();
+  });
+
+program
   .command("stats")
   .description("Where your search stands")
   .action(() => {
@@ -111,6 +144,10 @@ program
     const sent = c.applied + c.replied + c.interview + c.offer + c.rejected;
     const positive = c.replied + c.interview + c.offer;
     if (sent > 0) console.log(`\n${sent} sent, ${positive} with a positive reply (${Math.round((100 * positive) / sent)}%).`);
+    if (c.applied > 0 && existsSync(PATHS.profile)) {
+      const due = store.followUps(loadProfile(PATHS.profile).followUpAfterDays).length;
+      if (due > 0) console.log(`${due} due a follow-up. See: npm run job -- followups`);
+    }
     store.close();
   });
 

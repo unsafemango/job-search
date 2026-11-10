@@ -163,6 +163,50 @@ describe("store and discover", () => {
     store.close();
   });
 
+  it("lists applications due a follow-up, longest wait first", () => {
+    const store = new Store(":memory:");
+    const day = (n: number) => new Date(NOW.getTime() + n * 24 * 60 * 60 * 1000);
+    ingest(
+      [job({ id: "old00001" }), job({ id: "recent01" }), job({ id: "replied1" }), job({ id: "notyet01" })],
+      profile, store, NOW,
+    );
+    store.setStatus("old00001", "applied", "", NOW);
+    store.setStatus("recent01", "applied", "", day(5));
+    store.setStatus("replied1", "applied", "", NOW);
+    store.setStatus("replied1", "replied", "", day(2));
+
+    const due = store.followUps(7, day(10));
+    expect(due.map((f) => [f.job.id, f.days, f.followUps])).toEqual([["old00001", 10, 0]]);
+    expect(store.followUps(3, day(10)).map((f) => f.job.id)).toEqual(["old00001", "recent01"]);
+
+    // Following up starts the wait again and is counted.
+    store.followedUp("old00001", "emailed the recruiter", day(10));
+    expect(store.followUps(7, day(12)).map((f) => f.job.id)).toEqual(["recent01"]);
+    expect(store.followUps(7, day(17))).toMatchObject([
+      { job: { id: "recent01" }, days: 12, followUps: 0 },
+      { job: { id: "old00001" }, days: 7, followUps: 1 },
+    ]);
+    expect(store.get("old00001")?.status).toBe("applied");
+    expect(store.events("old00001").at(-1)).toMatchObject({ kind: "followed_up", note: "emailed the recruiter" });
+    expect(() => store.followedUp("nope")).toThrow(/No job/);
+    store.close();
+  });
+
+  it("keeps an application in follow-ups after a later discover drops the posting", () => {
+    const store = new Store(":memory:");
+    ingest([job()], profile, store, NOW);
+    store.setStatus("abc12345", "applied", "", NOW);
+    const later = new Date("2026-12-31T12:00:00Z");
+    ingest([job()], profile, store, later);
+    expect(store.get("abc12345")?.filteredReason).toMatch(/days ago/);
+    expect(store.followUps(7, later).map((f) => f.job.id)).toEqual(["abc12345"]);
+    store.close();
+  });
+
+  it("defaults followUpAfterDays to 7", () => {
+    expect(profile.followUpAfterDays).toBe(7);
+  });
+
   it("reports a board that fails and carries on with the rest", async () => {
     const store = new Store(":memory:");
     const companies: Company[] = [

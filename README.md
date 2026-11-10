@@ -18,6 +18,7 @@ Most job tools are built for volume. This one is built for attention: a short, r
 - Filters by title, excluded keywords, seniority level, location, remote, excluded companies and posting age
 - Scores each match on title (35), skills named in the posting (35), location (20) and recency (10)
 - Tracks status: `new`, `shortlisted`, `applied`, `replied`, `interview`, `offer`, `rejected`, `dismissed`, with a dated history and notes
+- Reminds you to follow up on applications that have gone quiet
 - Shows a summary of your search, including your positive reply rate
 
 ## Requirements
@@ -54,8 +55,16 @@ npm run job -- list                          # best new matches first
 npm run job -- list --status applied -n 50   # filter by status
 npm run job -- show <id>                     # score breakdown and history
 npm run job -- mark <id> applied --note "Referred by Sam"
+npm run job -- followups                     # applications due a follow-up
+npm run job -- followed-up <id> --note "Emailed the recruiter"
 npm run job -- stats                         # where your search stands
 ```
+
+### Follow-ups
+
+An application is due a follow-up when it is still `applied` (no reply yet) and `followUpAfterDays` (default 7) have passed since you applied or last followed up. `followups` lists them, longest wait first. Use `--days <n>` to check a different wait.
+
+When you follow up, run `followed-up <id>`. That logs it in the job's history and starts the wait again. When a company replies, `mark <id> replied` takes the job off the list. `stats` also shows how many follow-ups are due.
 
 ### Profile
 
@@ -78,7 +87,8 @@ npm run job -- stats                         # where your search stands
   },
   "skills": ["TypeScript", "Python", "React", "PostgreSQL"],
   "excludeCompanies": [],
-  "maxPostingAgeDays": 45
+  "maxPostingAgeDays": 45,
+  "followUpAfterDays": 7
 }
 ```
 
@@ -124,7 +134,6 @@ data/             your files (git-ignored; examples are tracked)
 See [PLAN.md](PLAN.md) for the full plan. Next up:
 
 - More sources (GitHub job lists, Workday, CSV import) and cross-source duplicate detection
-- Follow-up reminders for applications with no reply
 - Model-rated fit, tailored resumes and a local review dashboard
 - Assisted form filling, where you approve every submission
 

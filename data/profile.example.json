@@ -17,5 +17,6 @@
   },
   "skills": ["TypeScript", "Python", "React", "Node.js", "PostgreSQL", "Docker"],
   "excludeCompanies": [],
-  "maxPostingAgeDays": 45
+  "maxPostingAgeDays": 45,
+  "followUpAfterDays": 7
 }
