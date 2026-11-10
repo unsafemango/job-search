@@ -1,0 +1,6 @@
+node_modules/
+.env
+
+# Everything about you. Only the examples are tracked.
+data/*
+!data/*.example.json

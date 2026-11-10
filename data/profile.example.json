@@ -1,0 +1,21 @@
+{
+  "name": "Ada Lovelace",
+  "target": {
+    "titles": ["software engineer", "software developer", "backend", "full stack"],
+    "excludeKeywords": ["hardware", "sales", "manager"],
+    "levels": ["internship", "new_grad"]
+  },
+  "locations": {
+    "include": [
+      { "match": "Toronto", "weight": 1 },
+      { "match": "Canada", "weight": 0.8 },
+      { "match": "New York", "weight": 0.6 }
+    ],
+    "exclude": [],
+    "remote": true,
+    "remoteWeight": 0.9
+  },
+  "skills": ["TypeScript", "Python", "React", "Node.js", "PostgreSQL", "Docker"],
+  "excludeCompanies": [],
+  "maxPostingAgeDays": 45
+}
