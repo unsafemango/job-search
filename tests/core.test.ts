@@ -1,8 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { Store } from "../src/db.js";
 import { discover, ingest } from "../src/discover.js";
 import { filterJob, levelOf, locationMatch } from "../src/jobs/filters.js";
-import { hasTerm, htmlToText, jobId, type Job } from "../src/jobs/job.js";
+import { dedupeKey, hasTerm, htmlToText, jobId, type Job } from "../src/jobs/job.js";
 import { scoreJob } from "../src/jobs/score.js";
 import { parseProfile } from "../src/profile/schema.js";
 import { SOURCES, type Company } from "../src/sources/index.js";
@@ -53,6 +57,17 @@ describe("text helpers", () => {
   it("gives a posting the same id every time", () => {
     expect(jobId("lever", "acme", "1")).toBe(jobId("lever", "acme", "1"));
     expect(jobId("lever", "acme", "1")).not.toBe(jobId("ashby", "acme", "1"));
+  });
+
+  it("gives the same job the same dedupe key across boards", () => {
+    const a = { company: "Acme, Inc.", title: "Software Engineer - Intern", locations: ["Toronto, ON", "Montréal"], remote: false };
+    const b = { company: "acme", title: "Software Engineer, Intern", locations: ["Montreal", "toronto ON"], remote: false };
+    expect(dedupeKey(a)).toBe(dedupeKey(b));
+    expect(dedupeKey(a)).not.toBe(dedupeKey({ ...b, title: "Software Engineer II" }));
+    expect(dedupeKey(a)).not.toBe(dedupeKey({ ...b, locations: ["Toronto, ON"] }));
+    expect(dedupeKey({ ...a, locations: [], remote: true })).not.toBe(dedupeKey({ ...a, locations: [], remote: false }));
+    // "C++" and "C#" stay distinct.
+    expect(dedupeKey({ ...a, title: "C++ Engineer" })).not.toBe(dedupeKey({ ...a, title: "C# Engineer" }));
   });
 });
 
@@ -140,9 +155,9 @@ describe("sources", () => {
 describe("store and discover", () => {
   it("keeps your status when a job is seen again", () => {
     const store = new Store(":memory:");
-    expect(ingest([job()], profile, store, NOW)).toEqual({ kept: 1, newKept: 1 });
+    expect(ingest([job()], profile, store, NOW)).toEqual({ kept: 1, newKept: 1, duplicates: 0 });
     store.setStatus("abc12345", "applied", "referred by Sam", NOW);
-    expect(ingest([job({ title: "Software Engineer Intern (Summer)" })], profile, store, NOW)).toEqual({ kept: 1, newKept: 0 });
+    expect(ingest([job({ title: "Software Engineer Intern (Summer)" })], profile, store, NOW)).toEqual({ kept: 1, newKept: 0, duplicates: 0 });
 
     const stored = store.get("abc12345")!;
     expect(stored.status).toBe("applied");
@@ -161,6 +176,52 @@ describe("store and discover", () => {
     expect(store.get("senior01")?.filteredReason).toBe("level is senior");
     expect(store.filteredCounts()).toEqual([{ reason: "level is senior", n: 1 }]);
     store.close();
+  });
+
+  it("hides a second posting of the same job and keeps the first", () => {
+    const store = new Store(":memory:");
+    const first = job({ id: "ghfirst1", source: "greenhouse", url: "https://g/1" });
+    const again = job({ id: "lvagain1", source: "lever", company: "Acme Inc", url: "https://l/1", locations: ["toronto, on"] });
+    expect(ingest([first], profile, store, NOW)).toEqual({ kept: 1, newKept: 1, duplicates: 0 });
+    expect(ingest([again], profile, store, NOW)).toEqual({ kept: 0, newKept: 0, duplicates: 1 });
+
+    expect(store.list("new").map((j) => j.id)).toEqual(["ghfirst1"]);
+    expect(store.counts().new).toBe(1);
+    expect(store.isHiddenDuplicate("lvagain1")).toBe(true);
+    expect(store.isHiddenDuplicate("ghfirst1")).toBe(false);
+    expect(store.duplicatesOf("ghfirst1").map((j) => j.id)).toEqual(["lvagain1"]);
+
+    // Seen again on the next run, the same one stays hidden.
+    expect(ingest([again, first], profile, store, NOW)).toEqual({ kept: 1, newKept: 0, duplicates: 1 });
+    store.close();
+  });
+
+  it("never hides a job you have acted on", () => {
+    const store = new Store(":memory:");
+    ingest([job({ id: "first001" }), job({ id: "second01" })], profile, store, NOW);
+    store.setStatus("second01", "applied", "", NOW);
+    // The one you applied to wins; the other becomes the hidden copy.
+    expect(store.list("applied").map((j) => j.id)).toEqual(["second01"]);
+    expect(store.list("new")).toEqual([]);
+    expect(store.isHiddenDuplicate("first001")).toBe(true);
+    // Acting on both shows both.
+    store.setStatus("first001", "shortlisted", "", NOW);
+    expect(store.list("shortlisted").map((j) => j.id)).toEqual(["first001"]);
+    store.close();
+  });
+
+  it("adds dedupe keys to a database made before they existed", () => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), "job-search-")), "jobs.db");
+    const store = new Store(file);
+    ingest([job({ id: "olddb001" }), job({ id: "olddb002" })], profile, store, NOW);
+    store.close();
+    const raw = new DatabaseSync(file);
+    raw.exec("DROP INDEX jobs_by_dedupe_key; ALTER TABLE jobs DROP COLUMN dedupe_key;");
+    raw.close();
+
+    const reopened = new Store(file);
+    expect(reopened.list("new").map((j) => j.id)).toEqual(["olddb001"]);
+    reopened.close();
   });
 
   it("lists applications due a follow-up, longest wait first", () => {

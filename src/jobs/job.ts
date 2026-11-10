@@ -43,6 +43,29 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
+/** Lowercase, no accents, no punctuation, single spaces. */
+function normalize(text: string): string {
+  return text
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#]+/g, " ")
+    .trim();
+}
+
+const COMPANY_SUFFIX = /\s+(inc|llc|ltd|limited|corp|corporation|co|gmbh|plc)$/;
+
+/**
+ * The same posting on two boards, or posted twice on one, gets the same key:
+ * company, title and places, ignoring case, punctuation, accents and order.
+ */
+export function dedupeKey(job: Pick<Job, "company" | "title" | "locations" | "remote">): string {
+  const company = normalize(job.company).replace(COMPANY_SUFFIX, "");
+  const places = [...new Set(job.locations.map(normalize).filter(Boolean))].sort();
+  const where = places.length ? places.join(";") : job.remote ? "remote" : "";
+  return `${company}|${normalize(job.title)}|${where}`;
+}
+
 export function ageDays(job: Pick<Job, "postedAt">, now = new Date()): number | null {
   if (!job.postedAt) return null;
   const t = Date.parse(job.postedAt);

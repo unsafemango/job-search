@@ -10,23 +10,29 @@ export type DiscoverResult = {
   fetched: number;
   kept: number;
   newKept: number;
+  /** Matching postings hidden because they are the same job as another one. */
+  duplicates: number;
   failures: { company: string; error: string }[];
 };
 
+type IngestResult = { kept: number; newKept: number; duplicates: number };
+
 /** Rates and stores jobs already fetched. Separate from the network so it can be tested. */
-export function ingest(jobs: Job[], profile: Profile, store: Store, now = new Date()): { kept: number; newKept: number } {
-  let kept = 0;
-  let newKept = 0;
+export function ingest(jobs: Job[], profile: Profile, store: Store, now = new Date()): IngestResult {
+  const out: IngestResult = { kept: 0, newKept: 0, duplicates: 0 };
   for (const job of jobs) {
     const filteredReason = filterJob(job, profile, now);
     const { score, reasons } = filteredReason ? { score: 0, reasons: [] } : scoreJob(job, profile, now);
     const isNew = store.upsert(job, { level: levelOf(job.title), score, reasons, filteredReason }, now);
-    if (!filteredReason) {
-      kept++;
-      if (isNew) newKept++;
+    if (filteredReason) continue;
+    if (store.isHiddenDuplicate(job.id)) {
+      out.duplicates++;
+      continue;
     }
+    out.kept++;
+    if (isNew) out.newKept++;
   }
-  return { kept, newKept };
+  return out;
 }
 
 const BATCH = 5;
@@ -38,7 +44,7 @@ export async function discover(
   fetchOne: (c: Company) => Promise<Job[]> = fetchCompany,
   now = new Date(),
 ): Promise<DiscoverResult> {
-  const result: DiscoverResult = { fetched: 0, kept: 0, newKept: 0, failures: [] };
+  const result: DiscoverResult = { fetched: 0, kept: 0, newKept: 0, duplicates: 0, failures: [] };
   for (let i = 0; i < companies.length; i += BATCH) {
     const batch = companies.slice(i, i + BATCH);
     const settled = await Promise.allSettled(batch.map((c) => fetchOne(c)));
@@ -49,9 +55,10 @@ export async function discover(
         return;
       }
       result.fetched += s.value.length;
-      const { kept, newKept } = ingest(s.value, profile, store, now);
+      const { kept, newKept, duplicates } = ingest(s.value, profile, store, now);
       result.kept += kept;
       result.newKept += newKept;
+      result.duplicates += duplicates;
     });
   }
   return result;

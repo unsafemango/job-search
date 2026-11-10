@@ -17,6 +17,7 @@ Most job tools are built for volume. This one is built for attention: a short, r
 - Reads postings from **Greenhouse**, **Lever** and **Ashby** public APIs
 - Filters by title, excluded keywords, seniority level, location, remote, excluded companies and posting age
 - Scores each match on title (35), skills named in the posting (35), location (20) and recency (10)
+- Hides the same job posted twice, on one board or across boards, so it appears once
 - Tracks status: `new`, `shortlisted`, `applied`, `replied`, `interview`, `offer`, `rejected`, `dismissed`, with a dated history and notes
 - Reminds you to follow up on applications that have gone quiet
 - Shows a summary of your search, including your positive reply rate
@@ -59,6 +60,10 @@ npm run job -- followups                     # applications due a follow-up
 npm run job -- followed-up <id> --note "Emailed the recruiter"
 npm run job -- stats                         # where your search stands
 ```
+
+### Duplicates
+
+Two postings are the same job when the company, title and locations match, ignoring case, punctuation, accents, order and suffixes like "Inc". Only one shows in `list` and `stats`. If you've acted on one of them, that one shows; otherwise it's the one seen first. A job you've acted on is never hidden. `show <id>` lists the other postings of the same job.
 
 ### Follow-ups
 
@@ -133,7 +138,7 @@ data/             your files (git-ignored; examples are tracked)
 
 See [PLAN.md](PLAN.md) for the full plan. Next up:
 
-- More sources (GitHub job lists, Workday, CSV import) and cross-source duplicate detection
+- More sources (GitHub job lists, Workday, CSV import)
 - Model-rated fit, tailored resumes and a local review dashboard
 - Assisted form filling, where you approve every submission
 

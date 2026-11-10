@@ -5,7 +5,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Job } from "./jobs/job.js";
+import { dedupeKey, type Job } from "./jobs/job.js";
 
 export const STATUSES = ["new", "shortlisted", "applied", "replied", "interview", "offer", "rejected", "dismissed"] as const;
 export type Status = (typeof STATUSES)[number];
@@ -34,6 +34,19 @@ export type FollowUp = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Kept jobs with duplicates hidden. Among jobs with the same dedupe key, the
+ * one you have acted on wins, then the one seen first. A job you have acted on
+ * (any status but "new") is never hidden.
+ */
+const VISIBLE = `
+  SELECT * FROM (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY dedupe_key ORDER BY (status <> 'new') DESC, first_seen, id
+    ) AS dup_rank
+    FROM jobs WHERE filtered_reason IS NULL
+  ) WHERE NOT (status = 'new' AND dup_rank > 1)`;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -92,6 +105,19 @@ export class Store {
     if (file !== ":memory:") mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Brings a database made by an older version up to date. */
+  private migrate(): void {
+    const columns = (this.db.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]).map((c) => c.name);
+    if (!columns.includes("dedupe_key")) {
+      this.db.exec("ALTER TABLE jobs ADD COLUMN dedupe_key TEXT");
+      const rows = this.db.prepare("SELECT * FROM jobs").all() as Record<string, any>[];
+      const set = this.db.prepare("UPDATE jobs SET dedupe_key = ? WHERE id = ?");
+      for (const r of rows) set.run(dedupeKey(fromRow(r)), r.id);
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS jobs_by_dedupe_key ON jobs (dedupe_key)");
   }
 
   close(): void {
@@ -104,9 +130,10 @@ export class Store {
     const at = now.toISOString();
     this.db
       .prepare(
-        `INSERT INTO jobs (id, source, company, title, url, locations, remote, posted_at, description, level, score, reasons, filtered_reason, first_seen, last_seen)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO jobs (id, source, company, title, url, locations, remote, posted_at, description, level, score, reasons, filtered_reason, first_seen, last_seen, dedupe_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
+           dedupe_key = excluded.dedupe_key,
            company = excluded.company, title = excluded.title, url = excluded.url, locations = excluded.locations,
            remote = excluded.remote, posted_at = excluded.posted_at, description = excluded.description,
            level = excluded.level, score = excluded.score, reasons = excluded.reasons,
@@ -115,6 +142,7 @@ export class Store {
       .run(
         job.id, job.source, job.company, job.title, job.url, JSON.stringify(job.locations), job.remote ? 1 : 0,
         job.postedAt, job.description, rated.level, rated.score, JSON.stringify(rated.reasons), rated.filteredReason, at, at,
+        dedupeKey(job),
       );
     if (isNew) this.addEvent(job.id, "seen", "", now);
     return isNew;
@@ -125,11 +153,29 @@ export class Store {
     return row ? fromRow(row) : null;
   }
 
-  /** Kept jobs with this status, best first. */
+  /** Kept jobs with this status, best first, without duplicates. */
   list(status: Status, limit = 20): StoredJob[] {
     return this.db
-      .prepare("SELECT * FROM jobs WHERE status = ? AND filtered_reason IS NULL ORDER BY score DESC, posted_at DESC LIMIT ?")
+      .prepare(`${VISIBLE} AND status = ? ORDER BY score DESC, posted_at DESC LIMIT ?`)
       .all(status, limit)
+      .map(fromRow);
+  }
+
+  /** True when this job is kept but hidden because another posting is the same job. */
+  isHiddenDuplicate(id: string): boolean {
+    const job = this.db.prepare("SELECT filtered_reason FROM jobs WHERE id = ?").get(id) as { filtered_reason: string | null } | undefined;
+    if (!job || job.filtered_reason !== null) return false;
+    return !this.db.prepare(`SELECT 1 FROM (${VISIBLE}) WHERE id = ?`).get(id);
+  }
+
+  /** Other kept postings of the same job. */
+  duplicatesOf(id: string): StoredJob[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM jobs WHERE filtered_reason IS NULL AND id <> ?
+           AND dedupe_key = (SELECT dedupe_key FROM jobs WHERE id = ?) ORDER BY first_seen, id`,
+      )
+      .all(id, id)
       .map(fromRow);
   }
 
@@ -180,10 +226,10 @@ export class Store {
       .sort((a, b) => b.days - a.days || b.job.score - a.job.score);
   }
 
-  /** How many kept jobs are in each status. */
+  /** How many kept jobs are in each status, without duplicates. */
   counts(): Record<Status, number> {
     const out = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<Status, number>;
-    const rows = this.db.prepare("SELECT status, COUNT(*) AS n FROM jobs WHERE filtered_reason IS NULL GROUP BY status").all();
+    const rows = this.db.prepare(`SELECT status, COUNT(*) AS n FROM (${VISIBLE}) GROUP BY status`).all();
     for (const r of rows as { status: Status; n: number }[]) out[r.status] = r.n;
     return out;
   }

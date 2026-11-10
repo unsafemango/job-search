@@ -49,6 +49,7 @@ program
     const result = await discover(companies, profile, store);
     console.log(`Read ${result.fetched} postings from ${companies.length - result.failures.length} of ${companies.length} boards.`);
     console.log(`${result.kept} match your profile, ${result.newKept} of them new.`);
+    if (result.duplicates) console.log(`${result.duplicates} more were the same job posted again, and are hidden.`);
     for (const f of result.failures) console.log(`  Could not read ${f.company}: ${f.error}`);
     const dropped = store.filteredCounts();
     if (dropped.length) {
@@ -82,7 +83,13 @@ program
     console.log(line(job));
     console.log(`\n${job.url}\nStatus: ${job.status}   Level: ${job.level}`);
     if (job.filteredReason) console.log(`Dropped: ${job.filteredReason}`);
+    if (store.isHiddenDuplicate(id)) console.log("Hidden: the same job as another posting below.");
     for (const r of job.reasons) console.log(`  - ${r}`);
+    const dups = store.duplicatesOf(id);
+    if (dups.length) {
+      console.log("\nAlso posted as:");
+      for (const d of dups) console.log(`  ${d.id}  ${d.status.padEnd(11)}  ${d.url}`);
+    }
     console.log("\nHistory:");
     for (const e of store.events(id)) console.log(`  ${e.at.slice(0, 10)}  ${e.kind}${e.note ? `: ${e.note}` : ""}`);
     store.close();

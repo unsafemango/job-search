@@ -30,7 +30,7 @@ Useful with no browser automation and no model.
 - [x] Baseline score with reasons, no model (`src/jobs/score.ts`)
 - [x] CLI: `init`, `discover`, `list`, `show`, `mark`, `followups`, `followed-up`, `stats`
 - [ ] More sources: public GitHub job lists, Workday posting data, CSV import
-- [ ] Cross-source duplicate detection (same company, title and place)
+- [x] Cross-source duplicate detection (same company, title and place)
 - [x] Follow-up reminders (applied N days ago, no reply): `followups`, `followed-up`
 
 ### Phase 2: model-rated fit
