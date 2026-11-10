@@ -49,6 +49,24 @@ export type FollowUp = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const STOP = new Set("a an the and or of to in for on at with your you do are is be by this that what which please any".split(" "));
+const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
+
+/** A question with the filler taken out, so the same question asked two ways shares a key. */
+export function questionKey(q: string): string {
+  return [...new Set(words(q))].sort().join(" ");
+}
+
+/** How alike two questions are, 0 to 1, by the words they share. */
+export function similarity(a: string, b: string): number {
+  const x = new Set(words(a));
+  const y = new Set(words(b));
+  if (!x.size || !y.size) return 0;
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / (x.size + y.size - both);
+}
+
 /**
  * Kept jobs with duplicates hidden. Among jobs with the same dedupe key, the
  * one you have acted on wins, then the one seen first. A job you have acted on
@@ -102,6 +120,13 @@ CREATE TABLE IF NOT EXISTS applications (
   fields TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS applications_by_job ON applications (job_id);
+CREATE TABLE IF NOT EXISTS answer_memory (
+  key TEXT PRIMARY KEY,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  uses INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id TEXT NOT NULL REFERENCES jobs (id),
@@ -296,6 +321,40 @@ export class Store {
       .prepare("SELECT COUNT(*) AS n FROM applications WHERE state IN ('submitted', 'needs_you', 'unconfirmed') AND at >= ?")
       .get(midnight.toISOString()) as { n: number };
     return row.n;
+  }
+
+  /** Remembers an answer you gave to a form question, so later forms can reuse it. */
+  remember(question: string, answer: string, now = new Date()): void {
+    const key = questionKey(question);
+    if (!key || !answer.trim()) return;
+    this.db
+      .prepare(
+        `INSERT INTO answer_memory (key, question, answer, uses, updated_at) VALUES (?, ?, ?, 1, ?)
+         ON CONFLICT (key) DO UPDATE SET answer = excluded.answer, uses = uses + 1, updated_at = excluded.updated_at`,
+      )
+      .run(key, question.trim(), answer.trim(), now.toISOString());
+  }
+
+  /** Remembered answers to questions like these, closest first. */
+  recall(questions: string[], limit = 12): { question: string; answer: string }[] {
+    const rows = this.db.prepare("SELECT question, answer FROM answer_memory ORDER BY updated_at DESC").all() as { question: string; answer: string }[];
+    const scored = rows
+      .map((r) => ({ ...r, score: Math.max(0, ...questions.map((q) => similarity(q, r.question))) }))
+      .filter((r) => r.score >= 0.5)
+      .sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit).map(({ question, answer }) => ({ question, answer }));
+  }
+
+  /** Every remembered answer, or those whose question or answer contains `text`. */
+  memory(text = ""): { question: string; answer: string; uses: number }[] {
+    return this.db
+      .prepare("SELECT question, answer, uses FROM answer_memory WHERE question LIKE ? OR answer LIKE ? ORDER BY updated_at DESC")
+      .all(`%${text}%`, `%${text}%`) as { question: string; answer: string; uses: number }[];
+  }
+
+  /** Forgets the remembered answers whose question or answer contains `text`; returns how many. */
+  forget(text: string): number {
+    return Number(this.db.prepare("DELETE FROM answer_memory WHERE question LIKE ? OR answer LIKE ?").run(`%${text}%`, `%${text}%`).changes);
   }
 
   /** A cached rating, by `ratingKey`. */

@@ -4,7 +4,8 @@ import { Command } from "commander";
 import { STATUSES, Store, type Status, type StoredJob } from "./db.js";
 import { discover, ingest } from "./discover.js";
 import { ageDays } from "./jobs/job.js";
-import { ClaudeCodeRater } from "./model/claude-code.js";
+import { ClaudeCodeRater, claudeCodeJson } from "./model/claude-code.js";
+import { loadConnections, referralsFor } from "./referrals.js";
 import { ClaudeRater, isFatal } from "./model/claude.js";
 import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
@@ -262,6 +263,56 @@ program
     } finally {
       store.close();
     }
+  });
+
+program
+  .command("referrals <id>")
+  .description("People you know at this job's company, from data/connections.csv (your LinkedIn export), with a message to send")
+  .option("--draft", "have Claude draft a short message to each (uses your Claude plan)")
+  .action(async (id: string, opts: { draft?: boolean }) => {
+    const store = new Store(PATHS.db);
+    const job = store.get(id);
+    store.close();
+    if (!job) throw new Error(`No job with id ${id}.`);
+    const people = referralsFor(job.company, loadConnections(PATHS.connections));
+    if (!people.length) {
+      console.log(`No connections at ${job.company}.`);
+      return;
+    }
+    console.log(`${people.length} connection${people.length === 1 ? "" : "s"} at ${job.company} for "${job.title}":`);
+    const profile = opts.draft ? loadProfile(PATHS.profile) : null;
+    for (const p of people) {
+      console.log(`\n  ${p.name}, ${p.position || "?"} at ${p.company}\n  ${p.url}`);
+      if (profile) {
+        const { value } = await claudeCodeJson({
+          command: profile.rating.command,
+          model: profile.apply.model,
+          effort: "low",
+          system:
+            "You write one short, warm LinkedIn message from a job seeker to a connection who works at the company they are applying to, asking whether they would be open to a quick chat or a referral. Three or four plain sentences, no flattery, no made-up shared history, nothing the candidate's background does not support. Mention the role by its title.",
+          prompt: JSON.stringify({ candidate: profile.background, firstName: profile.contact.firstName, connection: p, role: job.title, company: job.company, link: job.url }),
+          schema: { type: "object", properties: { message: { type: "string" } }, required: ["message"], additionalProperties: false },
+        });
+        const message = (value as { message?: string } | null)?.message;
+        if (message) console.log(`\n${message.split("\n").map((l) => `    ${l}`).join("\n")}`);
+      }
+    }
+    console.log("\nNothing was sent. Copy a message to LinkedIn yourself if you want to reach out.");
+  });
+
+program
+  .command("memory")
+  .description("Answers written for past forms that apply reuses; --forget removes some")
+  .option("--forget <text>", "forget answers whose question or answer contains this")
+  .action((opts: { forget?: string }) => {
+    const store = new Store(PATHS.db);
+    if (opts.forget) console.log(`Forgot ${store.forget(opts.forget)} answer(s).`);
+    else {
+      const all = store.memory();
+      if (!all.length) console.log("No remembered answers yet. apply remembers written answers from forms that filled cleanly.");
+      for (const m of all) console.log(`${m.question}  (used ${m.uses}x)\n    ${m.answer}\n`);
+    }
+    store.close();
   });
 
 program

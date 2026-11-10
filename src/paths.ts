@@ -14,6 +14,8 @@ export const PATHS = {
   db: path.join(DATA, "jobs.db"),
   /** Your resume as data, the source of every tailored resume. */
   resumeData: path.join(DATA, "resume.json"),
+  /** Your LinkedIn connections export, for `referrals`. */
+  connections: path.join(DATA, "connections.csv"),
   /** Tailored resumes, one folder per job. */
   tailored: path.join(DATA, "tailored"),
   /** The apply browser's own profile: its cookies and sign-ins, apart from your everyday browser. */

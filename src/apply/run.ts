@@ -13,7 +13,14 @@ import { PATHS, ROOT } from "../paths.js";
 import type { Profile } from "../profile/schema.js";
 import { fillForm, openForm, submitForm, type FieldResult, type Session } from "./browser.js";
 import type { FormField } from "./form.js";
-import { checkPlan, planJsonSchema, PlanSchema, promptFor, SYSTEM, type MappedForm } from "./map.js";
+import { checkPlan, planJsonSchema, PlanSchema, promptFor, SYSTEM, type MappedForm, type Remembered } from "./map.js";
+
+const CONTACT = /\b(name|e-?mail|phone|linkedin|github|website|portfolio|url|twitter|location|city|address|country|province|state|postal|zip|company|title|pronouns?)\b/i;
+
+/** A field whose answer is worth remembering: a written question, not a contact detail. */
+export function isQuestion(f: FormField): boolean {
+  return (f.kind === "textarea" || f.kind === "text") && f.label.length > 25 && !CONTACT.test(f.label.split(/[?.]/)[0]!.slice(0, 40));
+}
 
 export type ApplyOptions = {
   ids?: string[];
@@ -21,7 +28,7 @@ export type ApplyOptions = {
   submit: boolean;
   session: () => Promise<Session>;
   /** Swapped out in tests. */
-  map?: (job: StoredJob, fields: FormField[], profile: Profile) => Promise<MappedForm>;
+  map?: (job: StoredJob, fields: FormField[], profile: Profile, memory: Remembered[]) => Promise<MappedForm>;
   log?: (line: string) => void;
   sleep?: (ms: number) => Promise<void>;
 };
@@ -29,13 +36,13 @@ export type ApplyOptions = {
 export type JobOutcome = { job: StoredJob; state: ApplicationState; detail: string; fields: FieldResult[]; leftOpen: boolean };
 
 /** Asks Claude Code what goes in each field, then checks the answer in code. */
-export async function mapWithClaude(job: StoredJob, fields: FormField[], profile: Profile, run?: Runner): Promise<MappedForm> {
+export async function mapWithClaude(job: StoredJob, fields: FormField[], profile: Profile, memory: Remembered[] = [], run?: Runner): Promise<MappedForm> {
   const { value, usage } = await claudeCodeJson({
     command: profile.rating.command,
     model: profile.apply.model,
     effort: profile.apply.effort,
     system: SYSTEM,
-    prompt: promptFor(job, fields, profile),
+    prompt: promptFor(job, fields, profile, memory),
     schema: planJsonSchema(),
     run,
   });
@@ -81,7 +88,7 @@ export function pickJobs(store: Store, opts: { ids?: string[]; count?: number })
 export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptions): Promise<{ outcomes: JobOutcome[]; notes: string[]; stopped: string | null }> {
   const log = opts.log ?? (() => {});
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const map = opts.map ?? ((job, fields, p) => mapWithClaude(job, fields, p));
+  const map = opts.map ?? ((job, fields, p, memory) => mapWithClaude(job, fields, p, memory));
   const resume = resumeFile(profile);
   if (!resume) return { outcomes: [], notes: [], stopped: `No resume found at "${profile.resumePath}". Set resumePath in your profile to your resume PDF.` };
   if (!profile.contact.email || !profile.contact.firstName) return { outcomes: [], notes: [], stopped: "Your profile has no contact details. Fill in contact (name, email, phone) first." };
@@ -124,7 +131,8 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         continue;
       }
 
-      const mapped = await map(job, dump.fields, profile);
+      const questions = dump.fields.filter(isQuestion).map((f) => f.label);
+      const mapped = await map(job, dump.fields, profile, store.recall(questions));
       if (mapped.verdict === "skip") {
         await page.close();
         record({ state: "skipped", detail: mapped.reason, fields: [], leftOpen: false });
@@ -140,6 +148,8 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         record({ state: "left_for_you", detail: unique.slice(0, 6).join("; "), fields: results, leftOpen: true });
         continue;
       }
+      // Free-text answers that filled cleanly are remembered for the next form that asks.
+      for (const plan of mapped.fields) if (isQuestion(plan.field) && plan.values[0]) store.remember(plan.field.label, plan.values[0]);
       if (!opts.submit) {
         record({ state: "ready", detail: "filled and checked; not sent (run with --submit to send)", fields: results, leftOpen: true });
         continue;

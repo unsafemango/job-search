@@ -51,7 +51,7 @@ How to fill:
 - Location fields get the candidate's city, region and country. Phone fields get the phone as given.
 - Salary questions: use the standing answer for the job's level (senior for senior/lead titles, mid otherwise), as a plain number or a short range from it.
 - "How did you hear about us": the standing answer, or the closest option.
-- Optional free-text questions (why this company, anything else) stay empty. A required one gets two or three plain, specific sentences drawn only from the facts and the posting.
+- Optional free-text questions (why this company, anything else) stay empty, unless a remembered answer fits. A required one gets two or three plain, specific sentences drawn only from the facts and the posting.
 - Leave optional fields empty when the facts do not cover them.
 
 Return every field id once, in "answers", with its values (empty array to leave it alone).`;
@@ -67,7 +67,9 @@ export function factsFor(profile: Profile) {
   };
 }
 
-export function promptFor(job: Job, fields: FormField[], profile: Profile): string {
+export type Remembered = { question: string; answer: string };
+
+export function promptFor(job: Job, fields: FormField[], profile: Profile, memory: Remembered[] = []): string {
   const form = fields.map((f) => ({
     id: f.id,
     kind: f.kind,
@@ -84,6 +86,13 @@ export function promptFor(job: Job, fields: FormField[], profile: Profile): stri
     "The job:",
     JSON.stringify({ company: job.company, title: job.title, locations: job.locations, remote: job.remote, posting: job.description.slice(0, 4000) }, null, 1),
     "",
+    ...(memory.length
+      ? [
+          "Answers the candidate gave before to similar questions. Reuse one, word for word, when a field asks the same thing; adapt only a company name:",
+          JSON.stringify(memory, null, 1),
+          "",
+        ]
+      : []),
     "The form's fields:",
     JSON.stringify(form, null, 1),
   ].join("\n");

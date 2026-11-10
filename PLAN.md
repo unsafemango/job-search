@@ -46,11 +46,11 @@ Useful with no browser automation and no model.
 
 ### Phase 3: prepare
 
-- [ ] Tailored one-page resume per job, rendered to PDF
-- [ ] Every number and proper noun in a draft checked against the profile in
+- [x] Tailored resume per job, rendered to PDF (`tailor`)
+- [x] Every number and proper noun in a draft checked against the profile in
       code; unsupported claims are refused
-- [ ] Draft answers for open questions, with an answer memory
-- [ ] Referral finder: match the company against a LinkedIn connections
+- [x] Draft answers for open questions, with an answer memory (`memory`)
+- [x] Referral finder: match the company against a LinkedIn connections
       export and draft a short message
 
 ### Phase 4: dashboard and approval

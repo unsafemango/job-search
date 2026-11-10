@@ -65,6 +65,9 @@ npm run job -- show <id>                     # score breakdown and history
 npm run job -- apply <id>                    # fill one job's form and check it; sends nothing
 npm run job -- apply --count 5 --submit      # fill and send your 5 best untried jobs
 npm run job -- applications [id]             # what happened, field by field
+npm run job -- tailor <id>                   # a resume tailored to one job (apply attaches it)
+npm run job -- referrals <id> --draft        # people you know there, and a message to send
+npm run job -- memory                        # answers apply reuses on later forms
 npm run job -- mark <id> applied --note "Referred by Sam"
 npm run job -- followups                     # applications due a follow-up
 npm run job -- followed-up <id> --note "Emailed the recruiter"
@@ -84,6 +87,16 @@ npm run job -- stats                         # where your search stands
 A form is left for you, with the reason, when it needs something the tool must not or cannot do: a sign-in, a CAPTCHA, an emailed code, a signature, a cover letter, or a question your profile doesn't answer. Add the answer to `answers.other` in your profile, and the next run uses it. A job that was sent, or might have been (Submit clicked with no confirmation), is never sent again. Each run respects `apply.maxPerDay` (default 15) and waits `apply.submitGapSeconds` (default 45) between sends. A sent job is marked `applied` in your tracker.
 
 It works on Greenhouse, Lever and Ashby. Workday (used by most banks and large companies) needs an account on each site and is not supported yet; those jobs show their link for you to apply yourself. Ashby saves each field to the employer's server as it's typed, so even a dry run there leaves an unsent draft. Some boards may treat automated browsers with suspicion; the tool does nothing to hide that it's automated.
+
+### Tailored resumes
+
+`tailor <id>` writes a resume for one job from `data/resume.json`, your resume as data (copy `data/resume.example.json` to start). Claude only **chooses**: which bullets to keep for each role and in what order, which project, which skill groups first. It never rewords a bullet. It does rewrite the summary, and code then checks every number and named term in the new summary against your resume. If anything isn't there, your original summary is kept. The result is rendered to PDF through Chrome, at most two pages, in `data/tailored/<id>/`, and `apply` attaches it to that job's form.
+
+### Answer memory and referrals
+
+When a form fills cleanly, `apply` remembers your written answers. A later form asking the same question gets the same answer, word for word. `memory` lists them, and `memory --forget <text>` removes some.
+
+`referrals <id>` lists people at the job's company from your LinkedIn connections export, saved as `data/connections.csv`. It matches by name, by part of a name, or by acronym ("RBC" for Royal Bank of Canada). With `--draft`, Claude writes a short message to each. Nothing is sent.
 
 ### Model-rated fit
 
