@@ -16,6 +16,8 @@ export const PATHS = {
   resumeData: path.join(DATA, "resume.json"),
   /** How you write (optional), for tailored resumes and cover letters. */
   voice: path.join(DATA, "voice.md"),
+  /** Your answer bank (optional): saved answers and facts that written form answers draw on. */
+  answers: path.join(DATA, "answers.md"),
   /** Your LinkedIn connections export, for `referrals`. */
   connections: path.join(DATA, "connections.csv"),
   /** Tailored resumes, one folder per job. */

@@ -4,7 +4,7 @@
  * clean, only with --submit, and never twice. Anything else is left for you
  * with the reason.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ApplicationState, Store, StoredJob } from "../db.js";
 import { claudeCodeJson, type Runner } from "../model/claude-code.js";
@@ -66,6 +66,15 @@ export function resumeFacts(): string[] {
   }
 }
 
+/** Your answer bank file, or nothing when there is none. */
+export function loadAnswerBank(): string {
+  try {
+    return readFileSync(PATHS.answers, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 /** Everything true about you that a written answer may draw on: the resume and its facts, the profile and its answers. */
 export function factsText(profile: Profile): string {
   let resume = "";
@@ -74,7 +83,7 @@ export function factsText(profile: Profile): string {
   } catch {
     // No resume data: only the profile counts.
   }
-  return [resume, profile.background, JSON.stringify(profile.contact), JSON.stringify(profile.answers), profile.skills.join(" ")].join("\n");
+  return [resume, profile.background, JSON.stringify(profile.contact), JSON.stringify(profile.answers), profile.skills.join(" "), loadAnswerBank()].join("\n");
 }
 
 /** Asks Claude Code what goes in each field, then checks the answer in code. */
@@ -92,7 +101,7 @@ export async function mapWithClaude(
     model: profile.apply.model,
     effort: profile.apply.effort,
     system: SYSTEM,
-    prompt: promptFor(job, fields, profile, memory, written ? loadVoice(PATHS.voice) : "", written ? resumeFacts() : []),
+    prompt: promptFor(job, fields, profile, memory, written ? loadVoice(PATHS.voice) : "", written ? resumeFacts() : [], written ? loadAnswerBank() : ""),
     schema: planJsonSchema(),
     run,
   });

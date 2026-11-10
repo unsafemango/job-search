@@ -71,7 +71,7 @@ export function factsFor(profile: Profile) {
 
 export type Remembered = { question: string; answer: string };
 
-export function promptFor(job: Job, fields: FormField[], profile: Profile, memory: Remembered[] = [], voice = "", knownFacts: string[] = []): string {
+export function promptFor(job: Job, fields: FormField[], profile: Profile, memory: Remembered[] = [], voice = "", knownFacts: string[] = [], bank = ""): string {
   const form = fields.map((f) => ({
     id: f.id,
     kind: f.kind,
@@ -97,6 +97,9 @@ export function promptFor(job: Job, fields: FormField[], profile: Profile, memor
       : []),
     ...(knownFacts.length && fields.some((f) => f.kind === "textarea")
       ? ["More facts about the candidate, for written answers (all true; use only these and the above):", ...knownFacts.map((f) => `- ${f}`), ""]
+      : []),
+    ...(bank && fields.some((f) => f.kind === "textarea")
+      ? ["The candidate's own answer bank: facts, rules and example answers. Its facts are true. Copy the style of its examples, not the words. A fact it marks [X] is unknown:", bank, ""]
       : []),
     ...(voice && fields.some((f) => f.kind === "textarea")
       ? ["How the candidate writes (for any written answer):", voice, ""]
