@@ -215,9 +215,9 @@ describe("the browser runner, on a local form", () => {
     expect(dump.fields[5]!.options).toEqual(["Yes", "No"]);
 
     const values = [["Test"], ["test@example.com"], ["+1 416 555 0100"], ["resume"], ["Company careers page"], ["No"], ["Black or African American"], []];
-    const results = await fillForm(page, dump.fields.map((f, i) => ({ field: f, values: values[i]! })), resume);
+    const results = await fillForm(page, dump.fields.map((f, i) => ({ field: f, values: values[i]! })), resume, "Test_Person_Resume.pdf");
     expect(results.filter((r) => !r.ok)).toEqual([]);
-    expect(results.map((r) => r.shows)).toEqual(["Test", "test@example.com", "+1 416 555 0100", "Test_Resume.pdf", "Company careers page", "No", "Black or African American", ""]);
+    expect(results.map((r) => r.shows)).toEqual(["Test", "test@example.com", "+1 416 555 0100", "Test_Person_Resume.pdf", "Company careers page", "No", "Black or African American", ""]);
 
     expect(await submitForm(page, dump.submit!)).toMatchObject({ state: "submitted" });
     await page.close();

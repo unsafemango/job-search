@@ -51,10 +51,15 @@ export async function mapWithClaude(job: StoredJob, fields: FormField[], profile
   return { ...checkPlan(plan.data, fields, job, profile), usage };
 }
 
+/** The name employers see on your uploaded resume: First_Last_Resume.pdf. */
+export function uploadName(profile: Profile): string {
+  const parts = [profile.contact.firstName, profile.contact.lastName].filter(Boolean);
+  return `${parts.length ? parts.join("_") : "My"}_Resume.pdf`.replace(/[^\w.-]+/g, "_");
+}
+
 /** The tailored resume for a job, if `tailor` made one. */
 export function tailoredFile(profile: Profile, jobId: string): string {
-  const name = `${profile.contact.firstName || "My"}_${profile.contact.lastName || "Resume"}_Resume.pdf`.replace(/[^\w.-]+/g, "_");
-  return path.join(PATHS.tailored, jobId, name);
+  return path.join(PATHS.tailored, jobId, uploadName(profile));
 }
 
 export function resumeFile(profile: Profile, jobId?: string): string | null {
@@ -138,7 +143,7 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         record({ state: "skipped", detail: mapped.reason, fields: [], leftOpen: false });
         continue;
       }
-      const results = await fillForm(page, mapped.fields, resumeFile(profile, job.id) ?? resume);
+      const results = await fillForm(page, mapped.fields, resumeFile(profile, job.id) ?? resume, uploadName(profile));
       const problems = [...mapped.problems];
       for (const r of results) if (!r.ok) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
       for (const r of results) if (r.required && !r.shows && !r.wanted) problems.push(`"${r.label}" is required and empty`);

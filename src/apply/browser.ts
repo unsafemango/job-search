@@ -4,6 +4,7 @@
  * every value back, and sending only when told to. It does nothing to hide
  * that it is automated, and it never answers a CAPTCHA or a code.
  */
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { chromium, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { dumpForm, readValues, type FormDump, type FormField } from "./form.js";
@@ -95,14 +96,17 @@ async function pickOption(page: Page, value: string): Promise<string | null> {
 }
 
 /** Fills one field; returns the option clicked, for a dropdown or a suggestion box. */
-async function fillOne(page: Page, plan: FieldPlan, resumePath: string): Promise<string | null> {
+async function fillOne(page: Page, plan: FieldPlan, resumePath: string, uploadName?: string): Promise<string | null> {
   const { field, values } = plan;
   if (!values.length) return null;
   const box = at(page, field);
   const value = values[0]!;
   switch (field.kind) {
     case "file":
-      await box.setInputFiles(path.resolve(resumePath));
+      // Employers see the uploaded file's name, so it goes up as e.g. First_Last_Resume.pdf whatever it is called on disk.
+      await box.setInputFiles(
+        uploadName ? { name: uploadName, mimeType: "application/pdf", buffer: readFileSync(path.resolve(resumePath)) } : path.resolve(resumePath),
+      );
       await page.waitForTimeout(1_500);
       return null;
     case "select":
@@ -175,17 +179,17 @@ export function sameValue(plan: FieldPlan, shows: string, picked: string | null 
 }
 
 /** Fills every planned field, then reads the page back. A value that did not stick is tried once more. */
-export async function fillForm(page: Page, plans: FieldPlan[], resumePath: string): Promise<FieldResult[]> {
+export async function fillForm(page: Page, plans: FieldPlan[], resumePath: string, uploadName?: string): Promise<FieldResult[]> {
   const errors = new Map<string, string>();
   const picked = new Map<string, string | null>();
   for (const plan of plans) {
     try {
-      picked.set(plan.field.id, await fillOne(page, plan, resumePath));
+      picked.set(plan.field.id, await fillOne(page, plan, resumePath, uploadName));
     } catch (err) {
       errors.set(plan.field.id, err instanceof Error ? err.message.split("\n")[0]! : String(err));
     }
   }
-  const fileName = path.basename(resumePath);
+  const fileName = uploadName ?? path.basename(resumePath);
   const read = async () => {
     const shown = await page.evaluate(readValues);
     // Some boards replace the file box with the file's name once it uploads.
@@ -201,7 +205,7 @@ export async function fillForm(page: Page, plans: FieldPlan[], resumePath: strin
   for (const plan of plans) {
     if (!sameValue(plan, shown[plan.field.id] ?? "", picked.get(plan.field.id) ?? null)) {
       try {
-        picked.set(plan.field.id, await fillOne(page, plan, resumePath));
+        picked.set(plan.field.id, await fillOne(page, plan, resumePath, uploadName));
         errors.delete(plan.field.id);
       } catch {
         // Reported below from what the page shows.
