@@ -11,9 +11,10 @@ import { claudeCodeJson, type Runner } from "../model/claude-code.js";
 import { FatalRaterError } from "../model/rating.js";
 import { PATHS, ROOT } from "../paths.js";
 import type { Profile } from "../profile/schema.js";
-import { fillForm, openForm, submitForm, type FieldResult, type Session } from "./browser.js";
+import { coverLetterName, coverLetterText, deleteDocuments, existingDocuments, prepareDocuments, resumeName } from "../resume/documents.js";
+import { fillForm, openForm, submitForm, type FieldResult, type Session, type Uploads } from "./browser.js";
 import type { FormField } from "./form.js";
-import { checkPlan, planJsonSchema, PlanSchema, promptFor, SYSTEM, type MappedForm, type Remembered } from "./map.js";
+import { checkPlan, isCoverField, planJsonSchema, PlanSchema, promptFor, SYSTEM, type CoverAnswer, type MappedForm, type Remembered } from "./map.js";
 
 const CONTACT = /\b(name|e-?mail|phone|linkedin|github|website|portfolio|url|twitter|location|city|address|country|province|state|postal|zip|company|title|pronouns?)\b/i;
 
@@ -27,16 +28,30 @@ export type ApplyOptions = {
   count?: number;
   submit: boolean;
   session: () => Promise<Session>;
+  /** Write a resume (and a cover letter when needed) for each job first. Default: on, when data/resume.json exists. */
+  tailor?: boolean;
   /** Swapped out in tests. */
-  map?: (job: StoredJob, fields: FormField[], profile: Profile, memory: Remembered[]) => Promise<MappedForm>;
+  map?: (job: StoredJob, fields: FormField[], profile: Profile, memory: Remembered[], cover?: CoverAnswer) => Promise<MappedForm>;
+  /** Swapped out in tests: the documents for one job. */
+  prepare?: (job: StoredJob, cover: boolean) => Promise<JobDocuments>;
   log?: (line: string) => void;
   sleep?: (ms: number) => Promise<void>;
 };
 
+/** What a job's form gets: a resume (tailored, or your own), and a cover letter if one was written. */
+export type JobDocuments = { resume: string | null; coverLetter: string | null; coverText: string | null };
+
 export type JobOutcome = { job: StoredJob; state: ApplicationState; detail: string; fields: FieldResult[]; leftOpen: boolean };
 
 /** Asks Claude Code what goes in each field, then checks the answer in code. */
-export async function mapWithClaude(job: StoredJob, fields: FormField[], profile: Profile, memory: Remembered[] = [], run?: Runner): Promise<MappedForm> {
+export async function mapWithClaude(
+  job: StoredJob,
+  fields: FormField[],
+  profile: Profile,
+  memory: Remembered[] = [],
+  cover?: CoverAnswer,
+  run?: Runner,
+): Promise<MappedForm> {
   const { value, usage } = await claudeCodeJson({
     command: profile.rating.command,
     model: profile.apply.model,
@@ -48,22 +63,11 @@ export async function mapWithClaude(job: StoredJob, fields: FormField[], profile
   });
   const plan = PlanSchema.safeParse(value);
   if (!plan.success) throw new Error("Claude's answer for this form could not be read");
-  return { ...checkPlan(plan.data, fields, job, profile), usage };
+  return { ...checkPlan(plan.data, fields, job, profile, cover), usage };
 }
 
-/** The name employers see on your uploaded resume: First_Last_Resume.pdf. */
-export function uploadName(profile: Profile): string {
-  const parts = [profile.contact.firstName, profile.contact.lastName].filter(Boolean);
-  return `${parts.length ? parts.join("_") : "My"}_Resume.pdf`.replace(/[^\w.-]+/g, "_");
-}
-
-/** The tailored resume for a job, if `tailor` made one. */
-export function tailoredFile(profile: Profile, jobId: string): string {
-  return path.join(PATHS.tailored, jobId, uploadName(profile));
-}
-
-export function resumeFile(profile: Profile, jobId?: string): string | null {
-  if (jobId && existsSync(tailoredFile(profile, jobId))) return tailoredFile(profile, jobId);
+/** Your own resume file, from the profile. */
+export function resumeFile(profile: Profile): string | null {
   if (!profile.resumePath) return null;
   const file = path.isAbsolute(profile.resumePath) ? profile.resumePath : path.join(ROOT, profile.resumePath);
   return existsSync(file) ? file : null;
@@ -93,8 +97,22 @@ export function pickJobs(store: Store, opts: { ids?: string[]; count?: number })
 export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptions): Promise<{ outcomes: JobOutcome[]; notes: string[]; stopped: string | null }> {
   const log = opts.log ?? (() => {});
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const map = opts.map ?? ((job, fields, p, memory) => mapWithClaude(job, fields, p, memory));
+  const map = opts.map ?? ((job, fields, p, memory, cover) => mapWithClaude(job, fields, p, memory, cover));
   const resume = resumeFile(profile);
+  const tailor = opts.tailor ?? existsSync(PATHS.resumeData);
+  // A resume written for each job, and a cover letter when the form needs one; your own resume otherwise.
+  const prepare =
+    opts.prepare ??
+    (async (job: StoredJob, cover: boolean): Promise<JobDocuments> => {
+      if (!tailor) return { resume, coverLetter: null, coverText: null };
+      let have = existingDocuments(profile, job.id);
+      if (!have.resume || (cover && !have.coverLetter)) {
+        log(`${job.id}  writing a resume${cover ? " and cover letter" : ""} for ${job.company}...`);
+        await prepareDocuments(job, profile, { cover });
+        have = existingDocuments(profile, job.id);
+      }
+      return { resume: have.resume ?? resume, coverLetter: have.coverLetter, coverText: have.coverLetter ? coverLetterText(job.id, profile) : null };
+    });
   if (!resume) return { outcomes: [], notes: [], stopped: `No resume found at "${profile.resumePath}". Set resumePath in your profile to your resume PDF.` };
   if (!profile.contact.email || !profile.contact.firstName) return { outcomes: [], notes: [], stopped: "Your profile has no contact details. Fill in contact (name, email, phone) first." };
 
@@ -136,14 +154,28 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         continue;
       }
 
+      // A cover letter is written when the form requires one, or the posting asks for one.
+      const coverField = dump.fields.find(isCoverField);
+      const needCover = !!coverField && (coverField.required || /cover letter/i.test(job.description));
+      const docs = await prepare(job, needCover);
+      const cover: CoverAnswer | undefined =
+        coverField && needCover && docs.coverLetter
+          ? { id: coverField.id, values: coverField.kind === "file" ? ["cover_letter"] : docs.coverText ? [docs.coverText] : [] }
+          : undefined;
+      const uploads: Uploads = {
+        resume: { path: docs.resume ?? resume, name: resumeName(profile) },
+        ...(docs.coverLetter ? { cover: { path: docs.coverLetter, name: coverLetterName(profile) } } : {}),
+      };
+
       const questions = dump.fields.filter(isQuestion).map((f) => f.label);
-      const mapped = await map(job, dump.fields, profile, store.recall(questions));
+      const mapped = await map(job, dump.fields, profile, store.recall(questions), cover);
+      if (needCover && !cover) mapped.problems.push("the form needs a cover letter, and none could be written that your facts support");
       if (mapped.verdict === "skip") {
         await page.close();
         record({ state: "skipped", detail: mapped.reason, fields: [], leftOpen: false });
         continue;
       }
-      const results = await fillForm(page, mapped.fields, resumeFile(profile, job.id) ?? resume, uploadName(profile));
+      const results = await fillForm(page, mapped.fields, uploads);
       const problems = [...mapped.problems];
       for (const r of results) if (!r.ok) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
       for (const r of results) if (r.required && !r.shows && !r.wanted) problems.push(`"${r.label}" is required and empty`);
@@ -167,6 +199,8 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       if (sent.state === "submitted") {
         store.setStatus(job.id, "applied", "applied by the tool");
         await page.close();
+        // The resume and cover letter were made for this one application; it is sent, so they go.
+        if (deleteDocuments(job.id)) log(`${job.id}  deleted its tailored resume and cover letter`);
       }
       record({ state: sent.state, detail: sent.detail, fields: results, leftOpen: sent.state !== "submitted" });
     } catch (err) {

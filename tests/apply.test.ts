@@ -168,6 +168,9 @@ describe("pickJobs", () => {
   });
 });
 
+/** No tailored documents: the tests never call the real resume writer. */
+const noDocs = async () => ({ resume, coverLetter: null, coverText: null });
+
 /** A local form shaped like the boards' own, served from a file: no network, no employer. */
 const FORM = `<!doctype html><html><body>
 <form id="app" onsubmit="event.preventDefault(); document.body.innerHTML = '<h1>Thank you for applying!</h1>';">
@@ -215,7 +218,7 @@ describe("the browser runner, on a local form", () => {
     expect(dump.fields[5]!.options).toEqual(["Yes", "No"]);
 
     const values = [["Test"], ["test@example.com"], ["+1 416 555 0100"], ["resume"], ["Company careers page"], ["No"], ["Black or African American"], []];
-    const results = await fillForm(page, dump.fields.map((f, i) => ({ field: f, values: values[i]! })), resume, "Test_Person_Resume.pdf");
+    const results = await fillForm(page, dump.fields.map((f, i) => ({ field: f, values: values[i]! })), { resume: { path: resume, name: "Test_Person_Resume.pdf" } });
     expect(results.filter((r) => !r.ok)).toEqual([]);
     expect(results.map((r) => r.shows)).toEqual(["Test", "test@example.com", "+1 416 555 0100", "Test_Person_Resume.pdf", "Company careers page", "No", "Black or African American", ""]);
 
@@ -233,7 +236,7 @@ describe("the browser runner, on a local form", () => {
       reason: "",
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     });
-    const opts = { session: async () => session, map, sleep: async () => {} };
+    const opts = { session: async () => session, map, prepare: noDocs, sleep: async () => {} };
 
     const dry = await applyJobs(store, profile, { ...opts, ids: ["job00001"], submit: false });
     expect(dry.outcomes.map((o) => o.state)).toEqual(["ready"]);
@@ -259,10 +262,52 @@ describe("the browser runner, on a local form", () => {
       reason: "",
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     });
-    const r = await applyJobs(store, profile, { ids: ["job00001"], submit: true, session: async () => session, map, sleep: async () => {} });
+    const r = await applyJobs(store, profile, { ids: ["job00001"], submit: true, session: async () => session, map, prepare: noDocs, sleep: async () => {} });
     expect(r.outcomes.map((o) => o.state)).toEqual(["left_for_you"]);
     expect(store.wasSent("job00001")).toBe(false);
     expect(store.get("job00001")?.status).toBe("new");
     store.close();
   }, 60_000);
+
+  it("writes a cover letter when the form requires one, attaches it under its own name, and leaves the form for you without one", async () => {
+    const coverForm = path.join(dir, "cover.html");
+    writeFileSync(
+      coverForm,
+      FORM.replace(
+        '<label for="why">',
+        '<div><label for="cover_letter">Cover Letter*</label><input id="cover_letter" type="file" required></div><label for="why">',
+      ),
+    );
+    const letter = path.join(dir, "letter-on-disk.pdf");
+    writeFileSync(letter, "%PDF-1.4\n%%EOF\n");
+    const map = async (_j: unknown, fields: FormField[], _p: unknown, _m: unknown, cover?: { id: string; values: string[] }) => ({
+      fields: fields.map((f) => ({
+        field: f,
+        values: cover && f.id === cover.id ? cover.values : f.required && f.kind !== "file" ? (f.kind === "radio" ? ["No"] : f.kind === "email" ? ["test@example.com"] : f.kind === "tel" ? ["+1 416 555 0100"] : ["Test"]) : f.kind === "file" && /resume/i.test(f.label) ? ["resume"] : [],
+      })),
+      problems: [] as string[],
+      verdict: "ready" as const,
+      reason: "",
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    const asked: boolean[] = [];
+
+    const store = new Store(":memory:");
+    ingest([{ ...job, applyUrl: `file://${coverForm}` }], profile, store, NOW);
+    const withLetter = async (_j: unknown, cover: boolean) => (asked.push(cover), { resume, coverLetter: letter, coverText: "Text." });
+    const r = await applyJobs(store, profile, { ids: ["job00001"], submit: false, session: async () => session, map, prepare: withLetter, sleep: async () => {} });
+    expect(asked).toEqual([true]);
+    expect(r.outcomes.map((o) => o.state)).toEqual(["ready"]);
+    const coverResult = r.outcomes[0]!.fields.find((f) => f.label === "Cover Letter");
+    expect(coverResult).toMatchObject({ ok: true, shows: "Test_Person_Cover_Letter.pdf" });
+
+    const store2 = new Store(":memory:");
+    ingest([{ ...job, applyUrl: `file://${coverForm}` }], profile, store2, NOW);
+    const r2 = await applyJobs(store2, profile, { ids: ["job00001"], submit: true, session: async () => session, map, prepare: noDocs, sleep: async () => {} });
+    expect(r2.outcomes.map((o) => o.state)).toEqual(["left_for_you"]);
+    expect(r2.outcomes[0]!.detail).toContain("needs a cover letter");
+    expect(store2.wasSent("job00001")).toBe(false);
+    store.close();
+    store2.close();
+  }, 90_000);
 });

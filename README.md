@@ -65,7 +65,7 @@ npm run job -- show <id>                     # score breakdown and history
 npm run job -- apply <id>                    # fill one job's form and check it; sends nothing
 npm run job -- apply --count 5 --submit      # fill and send your 5 best untried jobs
 npm run job -- applications [id]             # what happened, field by field
-npm run job -- tailor <id>                   # a resume tailored to one job (apply attaches it)
+npm run job -- tailor <id> --cover           # a resume and cover letter for one job (apply makes these itself)
 npm run job -- referrals <id> --draft        # people you know there, and a message to send
 npm run job -- memory                        # answers apply reuses on later forms
 npm run job -- mark <id> applied --note "Referred by Sam"
@@ -108,9 +108,16 @@ In Claude Code, type `/inbox`. Claude searches your connected mail, read-only an
 
 Every score is stored with its four parts (title, skills or model fit, location, recency). Once you've sent at least 20 applications, with at least 5 positive replies and 5 without, `learn` compares the two groups and moves weight toward the parts that predicted a reply. Each weight can move at most 1.5x up or 0.5x down, and the four still sum to 100. `learn --save` writes them to your profile as `scoreWeights`, and the next `discover` rescores. Delete `scoreWeights` to go back to the defaults.
 
-### Tailored resumes
+### Resumes and cover letters for each job
 
-`tailor <id>` writes a resume for one job from `data/resume.json`, your resume as data (copy `data/resume.example.json` to start). Claude only **chooses**: which bullets to keep for each role and in what order, which project, which skill groups first. It never rewords a bullet. It does rewrite the summary, and code then checks every number and named term in the new summary against your resume. If anything isn't there, your original summary is kept. The result is rendered to PDF through Chrome, at most two pages, in `data/tailored/<id>/`, and `apply` attaches it to that job's form.
+Before filling a form, `apply` writes a new resume for that job, and a cover letter when the form requires one or the posting asks for one. You can also make them yourself with `tailor <id>`, or `tailor <id> --cover` for a cover letter too. They're written from `data/resume.json`, which holds your resume as data plus a `facts` list of true things that aren't on the resume. Copy `data/resume.example.json` to start. They're written in your voice, from `data/voice.md` if you have one.
+
+- **The resume** gets a headline with a role you can truthfully claim and the skills this job wants most, a short summary, skills grouped for the posting, and bullets reworded toward it. Roles that don't help are dropped, except your current one. It's at most two pages.
+- **The cover letter** is a few short, plain paragraphs: the role, then what you did that matches what the posting asks for most. It never mentions gaps.
+- **Every line is checked in code.** Any number or named term (a tool, a company, a product) that isn't in your resume or facts gets sent back to Claude once with the list. Whatever still fails is dropped, and a cover letter with too little left isn't sent. A form that needs a cover letter then waits for you.
+- **`notes.md`** lists the posting's keywords used, the gaps (what the posting wants that your facts don't show, so you know not to claim it), and numbers that would make the resume stronger.
+
+They're uploaded as `First_Last_Resume.pdf` and `First_Last_Cover_Letter.pdf`, kept in `data/tailored/<id>/` (git-ignored), and **deleted once the application is sent**. To use your own resume file instead, run `apply --no-tailor`.
 
 ### Answer memory and referrals
 

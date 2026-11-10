@@ -14,10 +14,8 @@ import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
 import { rateJobs } from "./rate.js";
 import { openSession } from "./apply/browser.js";
-import { applyJobs, tailoredFile } from "./apply/run.js";
-import { renderPdf } from "./resume/render.js";
-import { loadResume } from "./resume/schema.js";
-import { tailorResume, trimOnce } from "./resume/tailor.js";
+import { applyJobs } from "./apply/run.js";
+import { prepareDocuments } from "./resume/documents.js";
 import { createInterface } from "node:readline/promises";
 import { CSV_COLUMNS, parseCsvJobs } from "./sources/csv.js";
 import { loadCompanies } from "./sources/index.js";
@@ -195,7 +193,8 @@ program
   .option("-n, --count <n>", "how many of your best untried jobs, when no ids are given", "1")
   .option("--submit", "send each form that filled cleanly (without it, nothing is sent)")
   .option("--headless", "run without a visible window (forms needing you are then closed, not left open)")
-  .action(async (ids: string[], opts: { count: string; submit?: boolean; headless?: boolean }) => {
+  .option("--no-tailor", "attach your own resume instead of writing one for each job")
+  .action(async (ids: string[], opts: { count: string; submit?: boolean; headless?: boolean; tailor: boolean }) => {
     const profile = loadProfile(PATHS.profile);
     const count = Number(opts.count);
     if (!Number.isInteger(count) || count < 1) throw new Error(`--count must be a whole number above 0, not "${opts.count}".`);
@@ -207,6 +206,7 @@ program
         ids,
         count,
         submit: !!opts.submit,
+        ...(opts.tailor === false ? { tailor: false } : {}),
         session: async () => (session = await openSession(PATHS.browser, { headless: !!opts.headless })),
         log: (l) => console.log(l),
       });
@@ -231,10 +231,10 @@ program
 
 program
   .command("tailor <ids...>")
-  .description("Write a resume tailored to each job from data/resume.json (only reorders and picks; every claim checked)")
-  .action(async (ids: string[]) => {
+  .description("Write a resume for each job in your voice from data/resume.json, plus a cover letter with --cover (every claim checked)")
+  .option("--cover", "also write a cover letter")
+  .action(async (ids: string[], opts: { cover?: boolean }) => {
     const profile = loadProfile(PATHS.profile);
-    const resume = loadResume(PATHS.resumeData);
     const store = new Store(PATHS.db);
     try {
       for (const id of ids) {
@@ -243,26 +243,15 @@ program
           console.log(`${id}: no such job`);
           continue;
         }
-        const t = await tailorResume(resume, job, profile);
-        const file = tailoredFile(profile, id);
-        mkdirSync(path.dirname(file), { recursive: true });
-        // Trim the least relevant bullets until it fits on two pages, like most experienced resumes.
-        let pages = await renderPdf(t.resume, file);
-        for (let next = trimOnce(t.resume); pages > 2 && next; next = trimOnce(t.resume)) {
-          t.resume = next;
-          pages = await renderPdf(t.resume, file);
-        }
-        writeFileSync(file.replace(/\.pdf$/, ".json"), JSON.stringify({ plan: t.plan, refused: t.refused, resume: t.resume }, null, 2));
-        const kept = t.resume.experience.reduce((n, e) => n + e.bullets.length, 0);
-        const all = resume.experience.reduce((n, e) => n + e.bullets.length, 0);
+        const docs = await prepareDocuments(job, profile, { cover: !!opts.cover });
         console.log(`${id}  ${job.company}: ${job.title}`);
-        console.log(`           ${file}`);
-        console.log(`           ${pages} page${pages === 1 ? "" : "s"}, ${kept} of ${all} bullets, ${t.resume.projects.length} project${t.resume.projects.length === 1 ? "" : "s"}`);
-        if (t.refused.length) console.log(`           Summary kept as yours: the rewrite named things your resume does not (${t.refused.join(", ")})`);
-        else console.log(`           Summary: ${t.resume.summary}`);
-        store.addEvent(id, "tailored", path.basename(file));
+        console.log(`           Resume (${docs.pages} page${docs.pages === 1 ? "" : "s"}): ${docs.resume}`);
+        if (opts.cover) console.log(docs.coverLetter ? `           Cover letter: ${docs.coverLetter}` : "           No cover letter: too little was left after checking it against your facts.");
+        console.log(`           Notes (keywords, gaps, numbers to add): ${docs.notes}`);
+        if (docs.dropped.length) console.log(`           Left out ${docs.dropped.length} line(s) your facts don't support; see the notes.`);
+        store.addEvent(id, "tailored", opts.cover ? "resume and cover letter" : "resume");
       }
-      console.log("\napply attaches a job's tailored resume automatically.");
+      console.log("\napply attaches these automatically, and deletes them once the application is sent.");
     } finally {
       store.close();
     }

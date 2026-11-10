@@ -96,19 +96,24 @@ async function pickOption(page: Page, value: string): Promise<string | null> {
 }
 
 /** Fills one field; returns the option clicked, for a dropdown or a suggestion box. */
-async function fillOne(page: Page, plan: FieldPlan, resumePath: string, uploadName?: string): Promise<string | null> {
+/** The files a form may get: the resume, and a cover letter when one was written. Each goes up under its own name. */
+export type Uploads = { resume: { path: string; name: string }; cover?: { path: string; name: string } };
+
+async function fillOne(page: Page, plan: FieldPlan, uploads: Uploads): Promise<string | null> {
   const { field, values } = plan;
   if (!values.length) return null;
   const box = at(page, field);
   const value = values[0]!;
   switch (field.kind) {
     case "file":
+    {
       // Employers see the uploaded file's name, so it goes up as e.g. First_Last_Resume.pdf whatever it is called on disk.
-      await box.setInputFiles(
-        uploadName ? { name: uploadName, mimeType: "application/pdf", buffer: readFileSync(path.resolve(resumePath)) } : path.resolve(resumePath),
-      );
+      const file = value === "cover_letter" ? uploads.cover : uploads.resume;
+      if (!file) throw new Error("no cover letter to attach");
+      await box.setInputFiles({ name: file.name, mimeType: "application/pdf", buffer: readFileSync(path.resolve(file.path)) });
       await page.waitForTimeout(1_500);
       return null;
+    }
     case "select":
       await box.selectOption({ label: value });
       return null;
@@ -179,22 +184,23 @@ export function sameValue(plan: FieldPlan, shows: string, picked: string | null 
 }
 
 /** Fills every planned field, then reads the page back. A value that did not stick is tried once more. */
-export async function fillForm(page: Page, plans: FieldPlan[], resumePath: string, uploadName?: string): Promise<FieldResult[]> {
+export async function fillForm(page: Page, plans: FieldPlan[], uploads: Uploads): Promise<FieldResult[]> {
   const errors = new Map<string, string>();
   const picked = new Map<string, string | null>();
   for (const plan of plans) {
     try {
-      picked.set(plan.field.id, await fillOne(page, plan, resumePath, uploadName));
+      picked.set(plan.field.id, await fillOne(page, plan, uploads));
     } catch (err) {
       errors.set(plan.field.id, err instanceof Error ? err.message.split("\n")[0]! : String(err));
     }
   }
-  const fileName = uploadName ?? path.basename(resumePath);
+  const fileNames = new Map([["resume", uploads.resume.name], ["cover_letter", uploads.cover?.name ?? ""]]);
   const read = async () => {
     const shown = await page.evaluate(readValues);
     // Some boards replace the file box with the file's name once it uploads.
     for (const plan of plans) {
-      if (plan.field.kind === "file" && plan.values.length && !shown[plan.field.id]) {
+      const fileName = fileNames.get(plan.values[0] ?? "");
+      if (plan.field.kind === "file" && fileName && !shown[plan.field.id]) {
         if ((await page.getByText(fileName, { exact: false }).count()) > 0) shown[plan.field.id] = fileName;
       }
     }
@@ -205,7 +211,7 @@ export async function fillForm(page: Page, plans: FieldPlan[], resumePath: strin
   for (const plan of plans) {
     if (!sameValue(plan, shown[plan.field.id] ?? "", picked.get(plan.field.id) ?? null)) {
       try {
-        picked.set(plan.field.id, await fillOne(page, plan, resumePath, uploadName));
+        picked.set(plan.field.id, await fillOne(page, plan, uploads));
         errors.delete(plan.field.id);
       } catch {
         // Reported below from what the page shows.

@@ -26,6 +26,11 @@ export const ResumeSchema = z.object({
   projects: z.array(z.object({ name: z.string(), bullets: z.array(z.string()).min(1) })).default([]),
   skills: z.array(z.object({ group: z.string(), items: z.array(z.string()).min(1) })).default([]),
   education: z.array(z.object({ credential: z.string(), school: z.string(), location: z.string().default("") })).default([]),
+  /**
+   * True things about you that are not on the resume itself, one per line
+   * ("At Acme: built X"). A tailored resume or cover letter may use them.
+   */
+  facts: z.array(z.string()).default([]),
 });
 export type Resume = z.infer<typeof ResumeSchema>;
 
@@ -54,5 +59,6 @@ export function sourceText(r: Resume): string {
     ...r.projects.flatMap((p) => [p.name, ...p.bullets]),
     ...r.skills.flatMap((s) => [s.group, ...s.items]),
     ...r.education.flatMap((e) => [e.credential, e.school, e.location]),
+    ...r.facts,
   ].join("\n");
 }

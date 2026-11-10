@@ -42,7 +42,7 @@ Truth comes first:
 - Work authorization, sponsorship, citizenship, education and dates are exactly as the standing answers say. Answer sponsorship for the country the question is about (or the job's country if it does not say).
 - If a required field cannot be answered truthfully from the facts, leave it empty and set verdict to "needs_review", naming the field in reason.
 - Never sign for the candidate: a field asking them to type their name to agree to something, or an e-signature, stays empty and the verdict is "needs_review".
-- If the form requires a cover letter or references, set verdict to "skip" with the reason.
+- If the form requires references, set verdict to "skip" with the reason. Never skip for a cover letter: leave cover letter fields empty, the tool attaches one itself when it is needed.
 
 How to fill:
 - For select, combobox, radio and checkboxes fields, every value must be copied exactly from that field's options. For a demographic question the candidate left blank, pick the "decline / prefer not to say" option if there is one, else leave it empty.
@@ -98,6 +98,11 @@ export function promptFor(job: Job, fields: FormField[], profile: Profile, memor
   ].join("\n");
 }
 
+/** A box for a cover letter: a file upload or a text box that says so. */
+export function isCoverField(f: FormField): boolean {
+  return (f.kind === "file" || f.kind === "textarea") && /cover[\s_-]*letter/i.test(`${f.label} ${f.context} ${f.hint}`);
+}
+
 const SPONSOR = /sponsor/i;
 const AUTHORIZED = /(legally )?(authori[sz]ed|entitled|eligible|permitted)\b.*\bwork|right to work|work authori[sz]ation/i;
 const SIGNATURE = /signature|e-?sign|sign (your|here)|type your (full )?(legal )?name to|by typing your name/i;
@@ -122,7 +127,10 @@ export function matchOption(value: string, options: string[]): string | null {
 }
 
 /** Checks Claude's plan against the form and the profile. Pure, so it is tested offline. */
-export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Profile): Omit<MappedForm, "usage"> {
+/** A cover letter field and what goes in it: ["cover_letter"] for a file box, the letter's text for a text box. */
+export type CoverAnswer = { id: string; values: string[] };
+
+export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Profile, cover?: CoverAnswer): Omit<MappedForm, "usage"> {
   const byId = new Map(plan.answers.map((a) => [a.id, a.values.map((v) => v.trim()).filter(Boolean)]));
   const problems: string[] = [];
   const out: FieldPlan[] = [];
@@ -138,7 +146,10 @@ export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Pr
         values = [];
       } else values = matched as string[];
     }
-    if (field.kind === "file") values = values.some((v) => /resume|cv/i.test(v)) && !/autofill/i.test(question) ? ["resume"] : [];
+    if (field.kind === "file") values = values.some((v) => /resume|cv/i.test(v)) && !/autofill|cover/i.test(question) ? ["resume"] : [];
+    // The cover letter is the tool's own, written and checked against your facts; Claude does not fill it.
+    if (cover && field.id === cover.id) values = cover.values;
+    else if (isCoverField(field)) values = [];
 
     if (SIGNATURE.test(question) && values.length) {
       problems.push(`"${field.label}" asks for a signature, which is left for you`);
