@@ -68,7 +68,9 @@ export async function rateJobs(store: Store, profile: Profile, rater: Rater, opt
       outcome = { ok: false as const, reason: err instanceof Error ? err.message : String(err), costUsd: 0, usage: null };
     }
     result.costUsd += outcome.costUsd;
-    result.inputTokens += outcome.usage?.inputTokens ?? 0;
+    // Tokens read from the prompt cache are still input the model read.
+    const u = outcome.usage;
+    result.inputTokens += u ? u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens : 0;
     result.outputTokens += outcome.usage?.outputTokens ?? 0;
 
     if (!outcome.ok) {
