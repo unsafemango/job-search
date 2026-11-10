@@ -1,0 +1,7 @@
+[
+  { "source": "greenhouse", "slug": "stripe", "name": "Stripe" },
+  { "source": "greenhouse", "slug": "figma", "name": "Figma" },
+  { "source": "lever", "slug": "palantir", "name": "Palantir" },
+  { "source": "ashby", "slug": "ramp", "name": "Ramp" },
+  { "source": "ashby", "slug": "notion", "name": "Notion" }
+]

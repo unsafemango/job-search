@@ -1,0 +1,58 @@
+import { createHash } from "node:crypto";
+
+export type SourceName = "greenhouse" | "lever" | "ashby";
+
+/** One posting, in the same shape whichever board it came from. */
+export type Job = {
+  id: string;
+  source: SourceName;
+  company: string;
+  title: string;
+  url: string;
+  locations: string[];
+  remote: boolean;
+  /** ISO date, or null when the board does not say. */
+  postedAt: string | null;
+  /** Plain text. Empty when the board gives none. */
+  description: string;
+};
+
+/** A short, stable id: the same posting gets the same id on every run. */
+export function jobId(source: SourceName, slug: string, externalId: string): string {
+  return createHash("sha1").update(`${source}:${slug}:${externalId}`).digest("hex").slice(0, 8);
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, code: string) => {
+    if (code[0] === "#") {
+      const n = code[1]?.toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : whole;
+    }
+    return ENTITIES[code.toLowerCase()] ?? whole;
+  });
+}
+
+/** HTML, possibly entity-escaped (Greenhouse escapes it once), to plain text. */
+export function htmlToText(html: string): string {
+  const unescaped = /&lt;\w/.test(html) ? decodeEntities(html) : html;
+  return decodeEntities(unescaped.replace(/<(br|\/p|\/li|\/h\d|\/div)[^>]*>/gi, "\n").replace(/<[^>]+>/g, ""))
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
+    .trim();
+}
+
+export function ageDays(job: Pick<Job, "postedAt">, now = new Date()): number | null {
+  if (!job.postedAt) return null;
+  const t = Date.parse(job.postedAt);
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((now.getTime() - t) / 86_400_000));
+}
+
+/** True when `term` appears in `text` as a whole word. Works for "C++", "C#" and ".NET". */
+export function hasTerm(text: string, term: string): boolean {
+  const escaped = term.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!escaped) return false;
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "i").test(text);
+}
