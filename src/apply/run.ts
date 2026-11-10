@@ -12,7 +12,7 @@ import { FatalRaterError } from "../model/rating.js";
 import { PATHS, ROOT } from "../paths.js";
 import type { Profile } from "../profile/schema.js";
 import { coverLetterName, coverLetterText, deleteDocuments, existingDocuments, prepareDocuments, resumeName } from "../resume/documents.js";
-import { fillForm, openForm, submitForm, type FieldResult, type Session, type Uploads } from "./browser.js";
+import { fillForm, isLocationField, openForm, submitForm, type FieldResult, type Session, type Uploads } from "./browser.js";
 import type { FormField } from "./form.js";
 import { checkPlan, isCoverField, planJsonSchema, PlanSchema, promptFor, SYSTEM, type CoverAnswer, type MappedForm, type Remembered } from "./map.js";
 
@@ -186,9 +186,15 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         record({ state: "skipped", detail: mapped.reason, fields: [], leftOpen: false });
         continue;
       }
+      // A location box that picks from a list may not have your city: nearby places from your profile are tried after it.
+      for (const plan of mapped.fields) {
+        if (isLocationField(plan.field) && plan.values.length) plan.values = [...plan.values, ...profile.contact.fallbackLocations];
+      }
       const results = await fillForm(page, mapped.fields, uploads);
       const problems = [...mapped.problems];
-      for (const r of results) if (!r.ok) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
+      // A field you did not have to fill, left empty by the page, is not worth holding the application for;
+      // one that shows a different value than wanted is.
+      for (const r of results) if (!r.ok && (r.required || r.shows)) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
       for (const r of results) if (r.required && !r.shows && !r.wanted) problems.push(`"${r.label}" is required and empty`);
       const unique = [...new Set(problems)].map((p) => (p.length > 240 ? `${p.slice(0, 237)}...` : p));
 
@@ -228,7 +234,9 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
         break;
       }
       await page?.close().catch(() => {});
-      record({ state: "blocked", detail: `something went wrong: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`, fields: [], leftOpen: false });
+      // The first lines of a browser error name what it was doing ("waiting for locator(...)"), which says what failed.
+      const why = err instanceof Error ? err.message.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3).join(" ") : String(err);
+      record({ state: "blocked", detail: `something went wrong: ${why.slice(0, 300)}`, fields: [], leftOpen: false });
     }
   }
   return { outcomes, notes, stopped };

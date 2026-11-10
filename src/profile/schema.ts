@@ -56,6 +56,11 @@ export const ProfileSchema = z.object({
       linkedin: z.string().default(""),
       website: z.string().default(""),
       github: z.string().default(""),
+      /**
+       * Places to try, in order, when a form's list of locations does not have your city
+       * (for example a larger city nearby). Only used for location boxes that pick from a list.
+       */
+      fallbackLocations: z.array(z.string()).default([]),
     })
     .prefault({}),
   /** The resume file attached to applications (PDF). Relative paths are from the project folder. */

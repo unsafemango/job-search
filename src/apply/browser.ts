@@ -79,14 +79,49 @@ export function bestSuggestion(value: string, texts: string[]): string | null {
     for (const p of parts.slice(1)) if (text.toLowerCase().includes(p) || (REGION_CODES[p] && w.has(REGION_CODES[p]!))) score++;
     if (!best || score > best.score) best = { text, score };
   }
+  // "Concord, Ontario, Canada" must not become Concord, California: with a region or country named,
+  // a suggestion that matches neither is not the place.
+  if (best && parts.length > 1 && best.score === 0) return null;
   return best?.text ?? null;
+}
+
+const SUGGESTIONS = "[role=option]:visible, .dropdown-results > :visible, .dropdown-results li:visible, [class*=suggestion]:visible";
+
+/** Whether `shows` is the place `value`: its city, and (when `value` names one) its region or country, in full or as a code. */
+export function samePlace(shows: string, value: string): boolean {
+  const parts = value.toLowerCase().split(",").map((p) => p.trim()).filter(Boolean);
+  const s = shows.toLowerCase();
+  if (!parts[0] || !s.includes(parts[0])) return false;
+  if (parts.length === 1) return true;
+  const w = new Set(s.split(/[^a-z0-9]+/).filter(Boolean));
+  return parts.slice(1).some((p) => s.includes(p) || (REGION_CODES[p] !== undefined && w.has(REGION_CODES[p]!)));
+}
+
+/**
+ * Waits until the page's field values stop changing: at least 4 seconds, then once they have been the same
+ * for two looks in a row, and never more than 15 seconds.
+ */
+export async function settle(page: Page): Promise<void> {
+  const started = Date.now();
+  let before = "";
+  let steady = 0;
+  while (Date.now() - started < 15_000) {
+    await page.waitForTimeout(1_500);
+    const now = JSON.stringify(await page.evaluate(readValues).catch(() => ({})));
+    steady = now === before ? steady + 1 : 0;
+    before = now;
+    if (steady >= 2 && Date.now() - started >= 4_000) return;
+  }
+}
+
+/** A box for where you live, which boards fill from a list of places. */
+export function isLocationField(f: FormField): boolean {
+  return f.kind === "text" && /location|city|where (do )?you (live|reside)/i.test(`${f.label} ${f.hint}`) && !/work.*location|preferred|willing|relocat/i.test(f.label);
 }
 
 /** Chooses `value` in an open list of options; the option clicked, or null. */
 async function pickOption(page: Page, value: string): Promise<string | null> {
-  const options = page.locator(
-    "[role=option]:visible, .dropdown-results > :visible, .dropdown-results li:visible, [class*=suggestion]:visible",
-  );
+  const options = page.locator(SUGGESTIONS);
   const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
   if (!texts.length) return null;
   const best = bestSuggestion(value, texts);
@@ -142,13 +177,20 @@ async function fillOne(page: Page, plan: FieldPlan, uploads: Uploads): Promise<s
     default: {
       await box.click();
       // A location box suggests places as you type: type the city like a person would, then take the match.
-      if (/location|city|where/i.test(`${field.label} ${field.hint}`)) {
+      if (isLocationField(field)) {
+        // Each candidate place in turn (your city, then nearby places from your profile) until the page's own list has it.
+        for (const place of values) {
+          await box.fill("");
+          await box.pressSequentially(place.split(",")[0]!.trim(), { delay: 50 });
+          // The list of places arrives when it arrives; picking from it is what makes the box keep the value.
+          await page.locator(SUGGESTIONS).first().waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+          await page.waitForTimeout(300);
+          const picked = await pickOption(page, place).catch(() => null);
+          if (picked) return picked;
+        }
+        // No list offered a place that matches: leave the box empty rather than a wrong city.
         await box.fill("");
-        await box.pressSequentially(value.split(",")[0]!.trim(), { delay: 50 });
-        await page.waitForTimeout(2_000);
-        const picked = await pickOption(page, value).catch(() => null);
-        if (!picked) await box.fill(value);
-        return picked;
+        return null;
       }
       await box.fill(value);
       return null;
@@ -173,10 +215,10 @@ export function sameValue(plan: FieldPlan, shows: string, picked: string | null 
   if (field.kind === "checkbox") return (values[0] === "checked") === (shows !== "");
   if (field.kind === "tel" || /phone/i.test(field.label)) return digits(shows).endsWith(digits(values[0]!).slice(-10));
   if (field.kind === "checkboxes") return values.every((v) => norm(shows).includes(norm(v)));
-  if (field.kind === "combobox" || /location|city/i.test(field.label)) {
+  if (field.kind === "combobox" || isLocationField(field)) {
     if (!shows) return false;
-    const first = norm(values[0]!).split(",")[0]!;
-    if (norm(shows).includes(first)) return true;
+    // A place from your list of candidates, as the page shows it: the right city in the right region or country.
+    if (values.some((v) => samePlace(shows, v))) return true;
     // Only part of the choice is shown: trust it only for the exact option that was clicked.
     return picked !== null && norm(picked) === norm(values[0]!) && norm(picked).includes(norm(shows));
   }
@@ -187,13 +229,19 @@ export function sameValue(plan: FieldPlan, shows: string, picked: string | null 
 export async function fillForm(page: Page, plans: FieldPlan[], uploads: Uploads): Promise<FieldResult[]> {
   const errors = new Map<string, string>();
   const picked = new Map<string, string | null>();
-  for (const plan of plans) {
+  const attempt = async (plan: FieldPlan) => {
     try {
       picked.set(plan.field.id, await fillOne(page, plan, uploads));
+      errors.delete(plan.field.id);
     } catch (err) {
-      errors.set(plan.field.id, err instanceof Error ? err.message.split("\n")[0]! : String(err));
+      errors.set(plan.field.id, err instanceof Error ? err.message.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 2).join(" ") : String(err));
     }
-  }
+  };
+  // Files go up first. Some boards read an uploaded resume and fill the form from it a few seconds later
+  // (Lever does), so the page is given time to finish before anything else is typed.
+  const files = plans.filter((p) => p.field.kind === "file" && p.values.length);
+  for (const plan of files) await attempt(plan);
+  if (files.length) await settle(page);
   const fileNames = new Map([["resume", uploads.resume.name], ["cover_letter", uploads.cover?.name ?? ""]]);
   const read = async () => {
     const shown = await page.evaluate(readValues);
@@ -206,19 +254,30 @@ export async function fillForm(page: Page, plans: FieldPlan[], uploads: Uploads)
     }
     return shown;
   };
-  await page.waitForTimeout(800);
+  // What the page already shows (its own autofill) is left alone when it is what was wanted.
   let shown = await read();
   for (const plan of plans) {
-    if (!sameValue(plan, shown[plan.field.id] ?? "", picked.get(plan.field.id) ?? null)) {
+    if (plan.field.kind === "file" || !plan.values.length) continue;
+    if (!sameValue(plan, shown[plan.field.id] ?? "", null)) await attempt(plan);
+  }
+  await page.waitForTimeout(800);
+  shown = await read();
+  // Pages sometimes clear or re-draw a field after it is filled. Anything that did not stick is filled
+  // again, up to three rounds, with a pause for the page to settle each time.
+  for (let round = 0; round < 3; round++) {
+    const bad = plans.filter((plan) => !sameValue(plan, shown[plan.field.id] ?? "", picked.get(plan.field.id) ?? null));
+    if (!bad.length) break;
+    for (const plan of bad) {
       try {
         picked.set(plan.field.id, await fillOne(page, plan, uploads));
         errors.delete(plan.field.id);
-      } catch {
-        // Reported below from what the page shows.
+      } catch (err) {
+        errors.set(plan.field.id, err instanceof Error ? err.message.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 2).join(" ") : String(err));
       }
     }
+    await page.waitForTimeout(1_000);
+    shown = await read();
   }
-  shown = await read();
   return plans.map((plan) => {
     const shows = shown[plan.field.id] ?? "";
     return {
@@ -266,5 +325,8 @@ export async function submitForm(page: Page, submitSelector: string): Promise<Su
     const said = errors.map((e) => e.trim()).filter(Boolean);
     if (said.length && waited >= 3_000 && page.url() === before) return { state: "rejected", detail: said.slice(0, 3).join("; ") };
   }
-  return { state: "unconfirmed", detail: "Submit was clicked but no confirmation appeared; check your email before trying again" };
+  // What the page shows after Submit says why: an error banner, a challenge, or nothing at all.
+  const shown = await page.locator("body").innerText().catch(() => "");
+  const said = shown.replace(/\s+/g, " ").trim().slice(0, 220);
+  return { state: "unconfirmed", detail: `Submit was clicked but no confirmation appeared; check your email before trying again. The page showed: "${said}"` };
 }

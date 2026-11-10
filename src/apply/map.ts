@@ -139,13 +139,15 @@ export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Pr
     let values = byId.get(field.id) ?? [];
     const question = `${field.label} ${field.context}`;
 
-    if (field.options.length && values.length && field.kind !== "file") {
+    // A single checkbox is ticked with "checked", not an option name.
+    if (field.options.length && values.length && field.kind !== "file" && field.kind !== "checkbox") {
       const matched = values.map((v) => matchOption(v, field.options));
       if (matched.some((m) => m === null)) {
         problems.push(`"${field.label}": "${values.join(", ")}" is not one of its options`);
         values = [];
       } else values = matched as string[];
     }
+    if (field.kind === "checkbox" && values.length) values = /^(checked|yes|true|on)$/i.test(values[0]!) ? ["checked"] : [];
     if (field.kind === "file") values = values.some((v) => /resume|cv/i.test(v)) && !/autofill|cover/i.test(question) ? ["resume"] : [];
     // The cover letter is the tool's own, written and checked against your facts; Claude does not fill it.
     if (cover && field.id === cover.id) values = cover.values;

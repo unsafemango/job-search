@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bestSuggestion, fillForm, openForm, openSession, sameValue, submitForm, type Session } from "../src/apply/browser.js";
+import { bestSuggestion, fillForm, isLocationField, openForm, openSession, sameValue, submitForm, type Session } from "../src/apply/browser.js";
 import { checkPlan, countryFor, matchOption, type Plan } from "../src/apply/map.js";
 import type { FormField } from "../src/apply/form.js";
 import { applyJobs, pickJobs } from "../src/apply/run.js";
@@ -136,6 +136,20 @@ describe("reading values back", () => {
     expect(bestSuggestion("London, Ontario, Canada", texts)).toBe("London, ON, CAN");
     expect(bestSuggestion("Toronto, Ontario, Canada", ["Toronto, OH, USA", "Toronto, ON, CAN"])).toBe("Toronto, ON, CAN");
     expect(bestSuggestion("Ottawa", ["Toronto, ON, CAN"])).toBeNull();
+    // A city with the right name in the wrong country is not the place.
+    expect(bestSuggestion("Guelph, Ontario, Canada", ["Guelph, CA, USA", "Guelph, NC, USA", "Guelph, NH, USA"])).toBeNull();
+    expect(bestSuggestion("Kitchener, Ontario, Canada", ["Kitchener, ON, CAN", "Kitchener, MS, USA"])).toBe("Kitchener, ON, CAN");
+  });
+
+  it("knows a location box, and accepts a nearby place from the list of candidates", () => {
+    const where = field("f0", "Current location", { kind: "text", hint: "location-input" });
+    expect(isLocationField(where)).toBe(true);
+    expect(isLocationField(field("f1", "Preferred work location", { kind: "text" }))).toBe(false);
+    expect(isLocationField(field("f2", "Full name", { kind: "text" }))).toBe(false);
+    const plan = { field: where, values: ["Guelph, Ontario, Canada", "Kitchener, Ontario, Canada"] };
+    expect(sameValue(plan, "Kitchener, ON, CAN")).toBe(true);
+    expect(sameValue(plan, "Guelph, CA, USA")).toBe(false);
+    expect(sameValue(plan, "")).toBe(false);
   });
 
   it("trusts a partly shown choice only when it is the exact option clicked", () => {
