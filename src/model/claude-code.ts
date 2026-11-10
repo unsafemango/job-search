@@ -82,6 +82,62 @@ type Envelope = {
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 };
 
+/**
+ * One headless Claude Code call that must answer in `schema`. Returns the
+ * parsed answer (not yet validated) and the tokens used. Throws a
+ * FatalRaterError when Claude Code is missing, signed out or out of usage.
+ */
+export async function claudeCodeJson(opts: {
+  command: string;
+  model: string;
+  effort: "low" | "medium" | "high";
+  system: string;
+  prompt: string;
+  schema: object;
+  run?: Runner;
+  timeoutMs?: number;
+}): Promise<{ value: unknown; usage: Usage }> {
+  const args = [
+    "-p",
+    "--model", opts.model,
+    "--effort", opts.effort,
+    "--output-format", "json",
+    "--json-schema", JSON.stringify(opts.schema),
+    "--tools", "",
+    "--no-session-persistence",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--system-prompt", opts.system,
+  ];
+  const out = await (opts.run ?? runCommand)(opts.command, args, opts.prompt, { timeoutMs: opts.timeoutMs ?? TIMEOUT_MS, env: childEnv(process.env) });
+  let envelope: Envelope;
+  try {
+    envelope = JSON.parse(out.stdout) as Envelope;
+  } catch {
+    const text = `${out.stderr}\n${out.stdout}`;
+    throw fatalFrom(text) ?? new Error(`Claude Code exited with ${out.code}: ${text.trim().slice(0, 300) || "no output"}`);
+  }
+  const usage: Usage = {
+    inputTokens: envelope.usage?.input_tokens ?? 0,
+    outputTokens: envelope.usage?.output_tokens ?? 0,
+    cacheReadTokens: envelope.usage?.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: envelope.usage?.cache_creation_input_tokens ?? 0,
+  };
+  if (envelope.is_error || out.code !== 0) {
+    const text = `${String(envelope.result ?? "")} ${out.stderr}`;
+    throw fatalFrom(text) ?? new Error(`Claude Code reported an error: ${text.trim().slice(0, 200) || envelope.subtype || "unknown"}`);
+  }
+  let value: unknown = envelope.structured_output;
+  if (value === undefined && typeof envelope.result === "string") {
+    try {
+      value = JSON.parse(envelope.result);
+    } catch {
+      value = null;
+    }
+  }
+  return { value, usage };
+}
+
 /** Turns Claude Code's own error text into a reason that stops the run, when it will not get better by itself. */
 function fatalFrom(text: string): FatalRaterError | null {
   if (/not logged in|please run \/login|invalid api key|authenticat|oauth/i.test(text)) {

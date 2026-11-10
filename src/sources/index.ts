@@ -6,7 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import { htmlToText, jobId, type Job } from "../jobs/job.js";
+import { applyUrlFor, htmlToText, jobId, type Job } from "../jobs/job.js";
 import type { Profile } from "../profile/schema.js";
 import { CompanySchema, isRemoteText, splitPlaces, str, unique, USER_AGENT, type Company } from "./common.js";
 import { fetchGithub } from "./github.js";
@@ -42,6 +42,8 @@ const greenhouse: Source = {
         remote: locations.some(isRemoteText),
         postedAt: str(j.first_published) || str(j.updated_at) || null,
         description: htmlToText(str(j.content)),
+        // The board's own form, even when the posting links to the company's careers site.
+        applyUrl: `https://job-boards.greenhouse.io/embed/job_app?for=${encodeURIComponent(company.slug)}&token=${String(j.id)}`,
       };
     });
   },
@@ -64,6 +66,7 @@ const lever: Source = {
         remote: str(j.workplaceType) === "remote" || locations.some(isRemoteText),
         postedAt: typeof j.createdAt === "number" ? new Date(j.createdAt).toISOString() : null,
         description: str(j.descriptionPlain).trim() || htmlToText(str(j.description)),
+        applyUrl: str(j.applyUrl) || applyUrlFor(str(j.hostedUrl)),
       };
     });
   },
@@ -90,6 +93,7 @@ const ashby: Source = {
           remote: j.isRemote === true || locations.some(isRemoteText),
           postedAt: str(j.publishedAt) || null,
           description: str(j.descriptionPlain).trim() || htmlToText(str(j.descriptionHtml)),
+          applyUrl: applyUrlFor(str(j.jobUrl)) ?? (str(j.applyUrl) || null),
         };
       });
   },

@@ -21,13 +21,15 @@ Most job tools are built for volume. This one is built for attention: a short, r
 - Optionally has Claude read each posting and rate how well it fits you, including requirements you don't meet, using your own Claude Code sign-in (no API key needed)
 - Hides the same job posted twice, on one board or across boards, so it appears once
 - Tracks status: `new`, `shortlisted`, `applied`, `replied`, `interview`, `offer`, `rejected`, `dismissed`, with a dated history and notes
+- Fills and sends applications on Greenhouse, Lever and Ashby in a Chrome window you can watch, checking every value before it sends, and never sending without `--submit`
 - Reminds you to follow up on applications that have gone quiet
 - Shows a summary of your search, including your positive reply rate
 
 ## Requirements
 
 - Node.js 24 or later (it uses the built-in `node:sqlite` module)
-- For `rate` only: [Claude Code](https://claude.com/claude-code) signed in with your Claude account (or, if you prefer, an Anthropic API key)
+- For `rate` and `apply`: [Claude Code](https://claude.com/claude-code) signed in with your Claude account (`rate` can use an Anthropic API key instead)
+- For `apply`: Google Chrome
 
 ## Getting started
 
@@ -60,11 +62,28 @@ npm run job -- list                          # best new matches first
 npm run job -- list --status applied -n 50   # filter by status
 npm run job -- rate                          # have Claude rate your best unrated jobs
 npm run job -- show <id>                     # score breakdown and history
+npm run job -- apply <id>                    # fill one job's form and check it; sends nothing
+npm run job -- apply --count 5 --submit      # fill and send your 5 best untried jobs
+npm run job -- applications [id]             # what happened, field by field
 npm run job -- mark <id> applied --note "Referred by Sam"
 npm run job -- followups                     # applications due a follow-up
 npm run job -- followed-up <id> --note "Emailed the recruiter"
 npm run job -- stats                         # where your search stands
 ```
+
+### Applying
+
+`apply` opens each job's application form in a Chrome window with its own profile (separate from your everyday browser), and for each form:
+
+1. Reads every question on the page: its label, its options, and whether it's required.
+2. Asks your local Claude Code what goes in each field, using only your profile: `contact`, `answers`, `background` and `resumePath`.
+3. Checks that answer in code before typing anything. Sponsorship and work authorization must match `answers` for the country asked about. A signature is never given. Every choice must be one of the field's real options.
+4. Fills the form, attaches your resume, then reads every value back from the page.
+5. Without `--submit`, stops there: nothing is sent, and the forms stay open for you to look at. With `--submit`, sends only a form where every value checked out and no required field is empty, then waits for the page to confirm it.
+
+A form is left for you, with the reason, when it needs something the tool must not or cannot do: a sign-in, a CAPTCHA, an emailed code, a signature, a cover letter, or a question your profile doesn't answer. Add the answer to `answers.other` in your profile, and the next run uses it. A job that was sent, or might have been (Submit clicked with no confirmation), is never sent again. Each run respects `apply.maxPerDay` (default 15) and waits `apply.submitGapSeconds` (default 45) between sends. A sent job is marked `applied` in your tracker.
+
+It works on Greenhouse, Lever and Ashby. Workday (used by most banks and large companies) needs an account on each site and is not supported yet; those jobs show their link for you to apply yourself. Ashby saves each field to the employer's server as it's typed, so even a dry run there leaves an unsent draft. Some boards may treat automated browsers with suspicion; the tool does nothing to hide that it's automated.
 
 ### Model-rated fit
 
@@ -178,6 +197,7 @@ src/
   rate.ts         model ratings within the run's caps
   db.ts           the SQLite store
   model/          the rating shape, the local Claude Code and API providers, pricing
+  apply/          reading, mapping, filling and sending application forms
   profile/        the profile schema (zod)
   sources/        job boards, GitHub lists, Workday and CSV import
   jobs/           the job shape, filters and scoring

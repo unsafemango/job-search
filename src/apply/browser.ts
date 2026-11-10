@@ -1,0 +1,260 @@
+/**
+ * The browser side of `apply`: a visible Chrome window with its own profile
+ * (apart from your everyday browser), opening forms, filling them, reading
+ * every value back, and sending only when told to. It does nothing to hide
+ * that it is automated, and it never answers a CAPTCHA or a code.
+ */
+import path from "node:path";
+import { chromium, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { dumpForm, readValues, type FormDump, type FormField } from "./form.js";
+import { matchOption, type FieldPlan } from "./map.js";
+
+export type Session = { context: BrowserContext; close: () => Promise<void> };
+
+export async function openSession(profileDir: string, opts: { headless: boolean }): Promise<Session> {
+  const context = await chromium.launchPersistentContext(profileDir, {
+    channel: "chrome",
+    headless: opts.headless,
+    viewport: opts.headless ? { width: 1280, height: 900 } : null,
+    args: opts.headless ? [] : ["--start-maximized"],
+  });
+  // tsx names nested functions with a helper the page does not have.
+  await context.addInitScript("globalThis.__name = globalThis.__name || ((f) => f)");
+  return { context, close: () => context.close() };
+}
+
+/** Opens a form and reads it, with each dropdown's options. */
+export async function openForm(session: Session, url: string): Promise<{ page: Page; dump: FormDump }> {
+  const page = await session.context.newPage();
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.evaluate("globalThis.__name = globalThis.__name || ((f) => f)");
+  const dump = await page.evaluate(dumpForm);
+  for (const field of dump.fields) {
+    if (field.kind === "combobox" && field.options.length === 0) field.options = await comboOptions(page, field);
+  }
+  return { page, dump };
+}
+
+const at = (page: Page, field: FormField): Locator => page.locator(`[data-ja="${field.id}"]`).first();
+
+/** Opens a dropdown to read its options, then closes it. Type-ahead boxes have none until you type. */
+async function comboOptions(page: Page, field: FormField): Promise<string[]> {
+  const box = at(page, field);
+  try {
+    await box.click({ timeout: 5_000 });
+    await page.waitForTimeout(400);
+    const options = await page.locator("[role=option]:visible").allInnerTexts();
+    await page.keyboard.press("Escape");
+    return [...new Set(options.map((o) => o.replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 300);
+  } catch {
+    return [];
+  }
+}
+
+const REGION_CODES: Record<string, string> = {
+  ontario: "on", quebec: "qc", "british columbia": "bc", alberta: "ab", manitoba: "mb", saskatchewan: "sk",
+  "nova scotia": "ns", "new brunswick": "nb", "newfoundland and labrador": "nl", "prince edward island": "pe",
+  canada: "can", "united states": "usa",
+};
+
+/**
+ * The suggestion that best fits a place like "London, Ontario, Canada": it must
+ * name the city, and the more of the region and country it names (in full or
+ * as a code, "ON", "CAN"), the better. Pure, so it is tested offline.
+ */
+export function bestSuggestion(value: string, texts: string[]): string | null {
+  const exact = matchOption(value, texts);
+  if (exact) return exact;
+  const parts = value.toLowerCase().split(",").map((p) => p.trim()).filter(Boolean);
+  const city = parts[0];
+  if (!city) return null;
+  const words = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  let best: { text: string; score: number } | null = null;
+  for (const text of texts) {
+    if (!text.toLowerCase().includes(city)) continue;
+    const w = words(text);
+    let score = 0;
+    for (const p of parts.slice(1)) if (text.toLowerCase().includes(p) || (REGION_CODES[p] && w.has(REGION_CODES[p]!))) score++;
+    if (!best || score > best.score) best = { text, score };
+  }
+  return best?.text ?? null;
+}
+
+/** Chooses `value` in an open list of options; the option clicked, or null. */
+async function pickOption(page: Page, value: string): Promise<string | null> {
+  const options = page.locator(
+    "[role=option]:visible, .dropdown-results > :visible, .dropdown-results li:visible, [class*=suggestion]:visible",
+  );
+  const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
+  if (!texts.length) return null;
+  const best = bestSuggestion(value, texts);
+  if (!best) return null;
+  await options.nth(texts.indexOf(best)).click({ timeout: 5_000 });
+  return best;
+}
+
+/** Fills one field; returns the option clicked, for a dropdown or a suggestion box. */
+async function fillOne(page: Page, plan: FieldPlan, resumePath: string): Promise<string | null> {
+  const { field, values } = plan;
+  if (!values.length) return null;
+  const box = at(page, field);
+  const value = values[0]!;
+  switch (field.kind) {
+    case "file":
+      await box.setInputFiles(path.resolve(resumePath));
+      await page.waitForTimeout(1_500);
+      return null;
+    case "select":
+      await box.selectOption({ label: value });
+      return null;
+    case "combobox": {
+      await box.click();
+      await box.fill(value.slice(0, 40));
+      await page.waitForTimeout(700);
+      const picked = await pickOption(page, value);
+      if (!picked) await page.keyboard.press("Enter");
+      return picked;
+    }
+    case "radio":
+    case "checkboxes":
+    case "checkbox": {
+      for (const [i, option] of field.options.entries()) {
+        const want = field.kind === "checkbox" ? values[0] === "checked" : values.includes(option);
+        const input = page.locator(`[data-ja="${field.id}"][data-ja-opt="${i}"]`).first();
+        if ((await input.isChecked()) === want) continue;
+        // Boards often hide the real box and draw their own; clicking its label works for both.
+        await input.click({ force: true }).catch(async () => {
+          await page.locator(`label:has([data-ja="${field.id}"][data-ja-opt="${i}"])`).first().click();
+        });
+      }
+      return null;
+    }
+    default: {
+      await box.click();
+      // A location box suggests places as you type: type the city like a person would, then take the match.
+      if (/location|city|where/i.test(`${field.label} ${field.hint}`)) {
+        await box.fill("");
+        await box.pressSequentially(value.split(",")[0]!.trim(), { delay: 50 });
+        await page.waitForTimeout(2_000);
+        const picked = await pickOption(page, value).catch(() => null);
+        if (!picked) await box.fill(value);
+        return picked;
+      }
+      await box.fill(value);
+      return null;
+    }
+  }
+}
+
+export type FieldResult = { label: string; kind: string; required: boolean; wanted: string; shows: string; ok: boolean };
+
+const digits = (s: string) => s.replace(/\D/g, "");
+
+/**
+ * Whether what the page shows is what was wanted. `picked` is the option that
+ * was clicked: a dropdown that shows only part of it (a flag and "+1" for
+ * "Canada +1") counts when that part comes from the exact option wanted.
+ */
+export function sameValue(plan: FieldPlan, shows: string, picked: string | null = null): boolean {
+  const { field, values } = plan;
+  if (!values.length) return true;
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  if (field.kind === "file") return shows !== "" && shows !== "0";
+  if (field.kind === "checkbox") return (values[0] === "checked") === (shows !== "");
+  if (field.kind === "tel" || /phone/i.test(field.label)) return digits(shows).endsWith(digits(values[0]!).slice(-10));
+  if (field.kind === "checkboxes") return values.every((v) => norm(shows).includes(norm(v)));
+  if (field.kind === "combobox" || /location|city/i.test(field.label)) {
+    if (!shows) return false;
+    const first = norm(values[0]!).split(",")[0]!;
+    if (norm(shows).includes(first)) return true;
+    // Only part of the choice is shown: trust it only for the exact option that was clicked.
+    return picked !== null && norm(picked) === norm(values[0]!) && norm(picked).includes(norm(shows));
+  }
+  return norm(shows) === norm(values[0]!);
+}
+
+/** Fills every planned field, then reads the page back. A value that did not stick is tried once more. */
+export async function fillForm(page: Page, plans: FieldPlan[], resumePath: string): Promise<FieldResult[]> {
+  const errors = new Map<string, string>();
+  const picked = new Map<string, string | null>();
+  for (const plan of plans) {
+    try {
+      picked.set(plan.field.id, await fillOne(page, plan, resumePath));
+    } catch (err) {
+      errors.set(plan.field.id, err instanceof Error ? err.message.split("\n")[0]! : String(err));
+    }
+  }
+  const fileName = path.basename(resumePath);
+  const read = async () => {
+    const shown = await page.evaluate(readValues);
+    // Some boards replace the file box with the file's name once it uploads.
+    for (const plan of plans) {
+      if (plan.field.kind === "file" && plan.values.length && !shown[plan.field.id]) {
+        if ((await page.getByText(fileName, { exact: false }).count()) > 0) shown[plan.field.id] = fileName;
+      }
+    }
+    return shown;
+  };
+  await page.waitForTimeout(800);
+  let shown = await read();
+  for (const plan of plans) {
+    if (!sameValue(plan, shown[plan.field.id] ?? "", picked.get(plan.field.id) ?? null)) {
+      try {
+        picked.set(plan.field.id, await fillOne(page, plan, resumePath));
+        errors.delete(plan.field.id);
+      } catch {
+        // Reported below from what the page shows.
+      }
+    }
+  }
+  shown = await read();
+  return plans.map((plan) => {
+    const shows = shown[plan.field.id] ?? "";
+    return {
+      label: plan.field.label,
+      kind: plan.field.kind,
+      required: plan.field.required,
+      wanted: plan.values.join(" || "),
+      shows: errors.has(plan.field.id) && !shows ? `(could not fill: ${errors.get(plan.field.id)})` : shows,
+      ok: sameValue(plan, shows, picked.get(plan.field.id) ?? null),
+    };
+  });
+}
+
+export type SubmitOutcome =
+  | { state: "submitted"; detail: string }
+  | { state: "needs_you"; detail: string }
+  | { state: "rejected"; detail: string }
+  | { state: "unconfirmed"; detail: string };
+
+const CONFIRMED = /thank(s| you) for (applying|your (application|interest))|application (has been |was )?(received|submitted)|we('ve| have) received your application|successfully (submitted|applied)/i;
+
+/** Clicks Submit and reads what the page became. Only a confirmation counts as sent. */
+export async function submitForm(page: Page, submitSelector: string): Promise<SubmitOutcome> {
+  const before = page.url();
+  await page.locator(submitSelector).first().click({ timeout: 10_000 });
+  for (let waited = 0; waited < 30_000; waited += 1_000) {
+    await page.waitForTimeout(1_000);
+    const body = await page.locator("body").innerText().catch(() => "");
+    if (CONFIRMED.test(body) || /confirmation|thank/i.test(new URL(page.url()).pathname)) {
+      return { state: "submitted", detail: body.match(CONFIRMED)?.[0] ?? page.url() };
+    }
+    const challenge = page.locator(
+      "iframe[src*='hcaptcha.com'][src*='challenge']:visible, iframe[title*='challenge' i]:visible, iframe[src*='recaptcha'][src*='bframe']:visible",
+    );
+    if ((await challenge.count()) > 0 && (await challenge.first().boundingBox())?.height) {
+      return { state: "needs_you", detail: "the site asked for a robot check; pass it in the window, then the form sends" };
+    }
+    if (/verification code|enter the code|we sent (you )?a code/i.test(body)) {
+      return { state: "needs_you", detail: "the site emailed you a code; type it in the window" };
+    }
+    const errors = await page
+      .locator("[role=alert]:visible, .error:visible, [class*=error-message]:visible, [aria-invalid=true]")
+      .allInnerTexts()
+      .catch(() => []);
+    const said = errors.map((e) => e.trim()).filter(Boolean);
+    if (said.length && waited >= 3_000 && page.url() === before) return { state: "rejected", detail: said.slice(0, 3).join("; ") };
+  }
+  return { state: "unconfirmed", detail: "Submit was clicked but no confirmation appeared; check your email before trying again" };
+}

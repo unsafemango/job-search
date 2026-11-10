@@ -1,21 +1,49 @@
 {
   "name": "Ada Lovelace",
   "target": {
-    "titles": ["software engineer", "software developer", "backend", "full stack"],
-    "excludeKeywords": ["hardware", "sales", "manager"],
-    "levels": ["internship", "new_grad"]
+    "titles": [
+      "software engineer",
+      "software developer",
+      "backend",
+      "full stack"
+    ],
+    "excludeKeywords": [
+      "hardware",
+      "sales",
+      "manager"
+    ],
+    "levels": [
+      "internship",
+      "new_grad"
+    ]
   },
   "locations": {
     "include": [
-      { "match": "Toronto", "weight": 1 },
-      { "match": "Canada", "weight": 0.8 },
-      { "match": "New York", "weight": 0.6 }
+      {
+        "match": "Toronto",
+        "weight": 1
+      },
+      {
+        "match": "Canada",
+        "weight": 0.8
+      },
+      {
+        "match": "New York",
+        "weight": 0.6
+      }
     ],
     "exclude": [],
     "remote": true,
     "remoteWeight": 0.9
   },
-  "skills": ["TypeScript", "Python", "React", "Node.js", "PostgreSQL", "Docker"],
+  "skills": [
+    "TypeScript",
+    "Python",
+    "React",
+    "Node.js",
+    "PostgreSQL",
+    "Docker"
+  ],
   "excludeCompanies": [],
   "maxPostingAgeDays": 45,
   "followUpAfterDays": 7,
@@ -27,5 +55,59 @@
     "effort": "low",
     "maxJobsPerRun": 25,
     "maxSpendPerRunUsd": 1
+  },
+  "contact": {
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "preferredName": "",
+    "email": "ada@example.com",
+    "phone": "+1 416 555 0100",
+    "city": "Toronto",
+    "region": "Ontario",
+    "country": "Canada",
+    "postalCode": "",
+    "linkedin": "https://www.linkedin.com/in/example",
+    "website": "",
+    "github": ""
+  },
+  "resumePath": "data/resume.pdf",
+  "answers": {
+    "authorizedCountries": [
+      "Canada"
+    ],
+    "needsSponsorship": {
+      "Canada": false,
+      "United States": true
+    },
+    "workPermit": "Canadian citizen",
+    "salary": {
+      "mid": 90000,
+      "senior": 110000,
+      "minimum": 80000,
+      "currency": "CAD"
+    },
+    "noticePeriod": "2 weeks",
+    "yearsOfExperience": 0,
+    "currentCompany": "",
+    "currentTitle": "",
+    "howDidYouHear": "Company careers page",
+    "demographics": {
+      "gender": "",
+      "pronouns": "",
+      "race": "",
+      "sexualOrientation": "",
+      "disability": "",
+      "veteran": ""
+    },
+    "acknowledgePrivacyNotices": false,
+    "other": {
+      "Willing to undergo a background check": "Yes"
+    }
+  },
+  "apply": {
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "submitGapSeconds": 45,
+    "maxPerDay": 15
   }
 }

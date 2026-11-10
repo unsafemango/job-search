@@ -60,10 +60,13 @@ Useful with no browser automation and no model.
 
 ### Phase 5: send
 
-- [ ] Playwright form filler, one board at a time (Greenhouse first)
-- [ ] Read every value back from the page before submitting
-- [ ] A submission is "unknown" until a confirmation page is seen; never sent twice
-- [ ] Sign-ins, human checks and signatures are handed to you
+- [x] Playwright form filler for Greenhouse, Lever and Ashby (`src/apply/`),
+      with Claude Code mapping fields from the profile and code checking
+      sponsorship, authorization, signatures and options
+- [x] Read every value back from the page before submitting
+- [x] A submission is "unconfirmed" until a confirmation page is seen; never sent twice
+- [x] Sign-ins, human checks and signatures are handed to you
+- [ ] Workday: accounts and forms with several pages
 - [ ] Weekly canary: fill a known form on each board without sending
 
 ### Phase 6: learn

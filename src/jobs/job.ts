@@ -18,7 +18,31 @@ export type Job = {
   description: string;
   /** The level the source says this job is, used when the title states none (e.g. a new-grad list). */
   level?: Level;
+  /** The application form itself, when the board has one `apply` can fill. */
+  applyUrl?: string | null;
 };
+
+/**
+ * The form for a posting link on a board `apply` can fill (Greenhouse, Lever,
+ * Ashby), or null.
+ */
+export function applyUrlFor(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (/(^|\.)greenhouse\.io$/.test(u.hostname)) {
+    const token = u.searchParams.get("token") ?? (parts[1] === "jobs" ? parts[2] : undefined);
+    const board = u.searchParams.get("for") ?? parts[0];
+    return board && token && /^\d+$/.test(token) ? `https://job-boards.greenhouse.io/embed/job_app?for=${board}&token=${token}` : null;
+  }
+  if (u.hostname === "jobs.lever.co" && parts.length >= 2) return `https://jobs.lever.co/${parts[0]}/${parts[1]}/apply`;
+  if (u.hostname === "jobs.ashbyhq.com" && parts.length >= 2) return `https://jobs.ashbyhq.com/${parts[0]}/${parts[1]}/application`;
+  return null;
+}
 
 /** A short, stable id: the same posting gets the same id on every run. */
 export function jobId(source: SourceName, slug: string, externalId: string): string {

@@ -9,6 +9,9 @@ import { ClaudeRater, isFatal } from "./model/claude.js";
 import { PATHS, ROOT } from "./paths.js";
 import { loadProfile } from "./profile/schema.js";
 import { rateJobs } from "./rate.js";
+import { openSession } from "./apply/browser.js";
+import { applyJobs } from "./apply/run.js";
+import { createInterface } from "node:readline/promises";
 import { CSV_COLUMNS, parseCsvJobs } from "./sources/csv.js";
 import { loadCompanies } from "./sources/index.js";
 
@@ -177,6 +180,66 @@ program
     } finally {
       store.close();
     }
+  });
+
+program
+  .command("apply [ids...]")
+  .description("Fill application forms (Greenhouse, Lever, Ashby) in a Chrome window; sends only with --submit")
+  .option("-n, --count <n>", "how many of your best untried jobs, when no ids are given", "1")
+  .option("--submit", "send each form that filled cleanly (without it, nothing is sent)")
+  .option("--headless", "run without a visible window (forms needing you are then closed, not left open)")
+  .action(async (ids: string[], opts: { count: string; submit?: boolean; headless?: boolean }) => {
+    const profile = loadProfile(PATHS.profile);
+    const count = Number(opts.count);
+    if (!Number.isInteger(count) || count < 1) throw new Error(`--count must be a whole number above 0, not "${opts.count}".`);
+    const store = new Store(PATHS.db);
+    let session: Awaited<ReturnType<typeof openSession>> | null = null;
+    try {
+      console.log(opts.submit ? "Applying, and sending each form that fills cleanly." : "Dry run: forms are filled and checked, nothing is sent.");
+      const r = await applyJobs(store, profile, {
+        ids,
+        count,
+        submit: !!opts.submit,
+        session: async () => (session = await openSession(PATHS.browser, { headless: !!opts.headless })),
+        log: (l) => console.log(l),
+      });
+      for (const n of r.notes) console.log(`  ${n}`);
+      if (!r.outcomes.length && !r.stopped) console.log("No jobs to apply to: none untried with a form the tool can fill. Name one with: npm run job -- apply <id>");
+      if (r.stopped) console.log(`Stopped: ${r.stopped}`);
+      const tally = new Map<string, number>();
+      for (const o of r.outcomes) tally.set(o.state, (tally.get(o.state) ?? 0) + 1);
+      if (tally.size) console.log(`\n${[...tally].map(([s, n]) => `${n} ${s.replace("_", " ")}`).join(", ")}. Details: npm run job -- applications`);
+      const open = r.outcomes.filter((o) => o.leftOpen);
+      if (session && !opts.headless && open.length && process.stdin.isTTY) {
+        console.log(`\n${open.length} form${open.length === 1 ? " is" : "s are"} open in the window for you to check or finish.`);
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        await rl.question("Press Enter to close the browser. ");
+        rl.close();
+      }
+    } finally {
+      await (session as Awaited<ReturnType<typeof openSession>> | null)?.close().catch(() => {});
+      store.close();
+    }
+  });
+
+program
+  .command("applications [id]")
+  .description("Show what happened to recent applications, or every field of one job's last attempt")
+  .action((id?: string) => {
+    const store = new Store(PATHS.db);
+    const apps = store.applications(id, id ? 1 : 30);
+    if (!apps.length) console.log(id ? `No applications for ${id}.` : "No applications yet. Try: npm run job -- apply");
+    for (const a of apps) {
+      const job = store.get(a.jobId);
+      console.log(`${a.at.slice(0, 16).replace("T", " ")}  ${a.jobId}  ${a.state.padEnd(12)} ${a.mode.padEnd(6)} ${job ? `${job.company}: ${job.title}` : ""}`);
+      console.log(`                  ${a.detail}`);
+      if (id) {
+        for (const f of a.fields as { label: string; wanted: string; shows: string; ok: boolean; required: boolean }[]) {
+          console.log(`    ${f.ok ? "ok " : "!! "}${f.required ? "*" : " "} ${f.label.slice(0, 60).padEnd(60)}  ${f.shows || (f.wanted ? "" : "(left empty)")}`);
+        }
+      }
+    }
+    store.close();
   });
 
 program

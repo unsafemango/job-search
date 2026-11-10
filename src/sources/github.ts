@@ -3,7 +3,7 @@
  * SimplifyJobs/New-Grad-Positions and SimplifyJobs/Summer2026-Internships.
  * One list covers many companies. The lists have no job descriptions.
  */
-import { jobId, type Job } from "../jobs/job.js";
+import { applyUrlFor, jobId, type Job } from "../jobs/job.js";
 import { getJson, isRemoteText, str, type Company, type FetchContext } from "./common.js";
 
 const REPO = /^[\w.-]+\/[\w.-]+$/;
@@ -26,6 +26,7 @@ export function parseGithub(body: unknown, company: Company): Job[] {
         company: str(j.company_name).trim(),
         title: str(j.title).trim(),
         url: str(j.url),
+        applyUrl: applyUrlFor(str(j.url)),
         locations,
         remote: locations.some(isRemoteText),
         postedAt: typeof j.date_posted === "number" ? new Date(j.date_posted * 1000).toISOString() : null,

@@ -2,7 +2,7 @@
  * Jobs from a CSV file you made or exported, for boards with no API.
  * The header row names the columns; only company, title and url are required.
  */
-import { jobId, type Job } from "../jobs/job.js";
+import { applyUrlFor, jobId, type Job } from "../jobs/job.js";
 import { LEVELS, type Level } from "../profile/schema.js";
 import { isRemoteText, splitPlaces } from "./common.js";
 
@@ -85,6 +85,7 @@ export function parseCsvJobs(text: string): CsvResult {
       company: get("company"),
       title: get("title"),
       url: get("url"),
+      applyUrl: applyUrlFor(get("url")),
       locations,
       remote: /^(y|yes|true|1|remote)$/i.test(get("remote")) || locations.some(isRemoteText),
       postedAt: Number.isNaN(postedMs) ? null : new Date(postedMs).toISOString(),

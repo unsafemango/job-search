@@ -41,6 +41,82 @@ export const ProfileSchema = z.object({
    * date, experience, work authorization. Used only by `rate`.
    */
   background: z.string().default(""),
+  /** What application forms ask for. Only `apply` uses it; it never leaves your machine except into the forms you apply through. */
+  contact: z
+    .object({
+      firstName: z.string().default(""),
+      lastName: z.string().default(""),
+      preferredName: z.string().default(""),
+      email: z.string().default(""),
+      phone: z.string().default(""),
+      city: z.string().default(""),
+      region: z.string().default(""),
+      country: z.string().default(""),
+      postalCode: z.string().default(""),
+      linkedin: z.string().default(""),
+      website: z.string().default(""),
+      github: z.string().default(""),
+    })
+    .prefault({}),
+  /** The resume file attached to applications (PDF). Relative paths are from the project folder. */
+  resumePath: z.string().default(""),
+  /**
+   * Standing answers to the questions most forms ask. A form question these do
+   * not settle, and the profile does not answer, is left for you.
+   */
+  answers: z
+    .object({
+      /** Countries you may work in without sponsorship. */
+      authorizedCountries: z.array(z.string()).default([]),
+      /** Per country: does working there need visa sponsorship, now or in future. Countries not listed: yes. */
+      needsSponsorship: z.record(z.string(), z.boolean()).default({}),
+      /** One line on your status, e.g. "Open work permit (PGWP)". */
+      workPermit: z.string().default(""),
+      /** Expected salary by level, in `salaryCurrency`. */
+      salary: z
+        .object({
+          mid: z.number().optional(),
+          senior: z.number().optional(),
+          minimum: z.number().optional(),
+          currency: z.string().default("CAD"),
+        })
+        .prefault({}),
+      noticePeriod: z.string().default(""),
+      yearsOfExperience: z.number().optional(),
+      currentCompany: z.string().default(""),
+      currentTitle: z.string().default(""),
+      howDidYouHear: z.string().default("Company careers page"),
+      /** Voluntary self-identification. Leave a field empty to decline it. */
+      demographics: z
+        .object({
+          gender: z.string().default(""),
+          pronouns: z.string().default(""),
+          race: z.string().default(""),
+          sexualOrientation: z.string().default(""),
+          disability: z.string().default(""),
+          veteran: z.string().default(""),
+        })
+        .prefault({}),
+      /**
+       * Whether to tick boxes that acknowledge a privacy notice or consent to
+       * processing your application. Never covers signing a contract or NDA.
+       */
+      acknowledgePrivacyNotices: z.boolean().default(false),
+      /** Anything else, as question: answer, e.g. "Willing to work hybrid in Toronto": "Yes". */
+      other: z.record(z.string(), z.string()).default({}),
+    })
+    .prefault({}),
+  /** How `apply` fills forms. */
+  apply: z
+    .object({
+      model: z.string().min(1).default("claude-opus-5-5"),
+      effort: z.enum(["low", "medium", "high"]).default("medium"),
+      /** Seconds to wait between two submissions. */
+      submitGapSeconds: z.number().nonnegative().default(45),
+      /** At most this many applications are sent per day. */
+      maxPerDay: z.number().int().positive().default(15),
+    })
+    .prefault({}),
   /** How `rate` uses a model to judge fit. */
   rating: z
     .object({

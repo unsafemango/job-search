@@ -24,6 +24,19 @@ export type StoredJob = Job & {
 
 export type JobEvent = { at: string; kind: string; note: string };
 
+/** How a go at a job's form ended. */
+export type ApplicationState =
+  | "ready" // filled and checked, not sent (dry run)
+  | "left_for_you" // filled, but something needs you before it can be sent
+  | "skipped" // the form wants something the tool does not give (a cover letter, references)
+  | "blocked" // no form could be filled: a sign-in, an unsupported board, an error page
+  | "submitted" // sent, and the page confirmed it
+  | "needs_you" // sent, waiting on a robot check or emailed code you finish in the window
+  | "rejected" // the page refused the submission
+  | "unconfirmed"; // Submit was clicked but no confirmation was seen
+
+export type Application = { id: number; jobId: string; at: string; mode: string; state: ApplicationState; detail: string; fields: unknown };
+
 /** An application still waiting on a reply, and how long it has waited. */
 export type FollowUp = {
   job: StoredJob;
@@ -79,6 +92,16 @@ CREATE TABLE IF NOT EXISTS ratings (
   cost_usd REAL NOT NULL,
   rated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS applications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  at TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  state TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  fields TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS applications_by_job ON applications (job_id);
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id TEXT NOT NULL REFERENCES jobs (id),
@@ -98,6 +121,7 @@ function fromRow(r: Record<string, any>): StoredJob {
     locations: JSON.parse(r.locations),
     remote: r.remote === 1,
     postedAt: r.posted_at,
+    applyUrl: r.apply_url ?? null,
     description: r.description,
     level: r.level,
     score: r.score,
@@ -129,6 +153,7 @@ export class Store {
       for (const r of rows) set.run(dedupeKey(fromRow(r)), r.id);
     }
     this.db.exec("CREATE INDEX IF NOT EXISTS jobs_by_dedupe_key ON jobs (dedupe_key)");
+    if (!columns.includes("apply_url")) this.db.exec("ALTER TABLE jobs ADD COLUMN apply_url TEXT");
   }
 
   close(): void {
@@ -141,10 +166,10 @@ export class Store {
     const at = now.toISOString();
     this.db
       .prepare(
-        `INSERT INTO jobs (id, source, company, title, url, locations, remote, posted_at, description, level, score, reasons, filtered_reason, first_seen, last_seen, dedupe_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO jobs (id, source, company, title, url, locations, remote, posted_at, description, level, score, reasons, filtered_reason, first_seen, last_seen, dedupe_key, apply_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
-           dedupe_key = excluded.dedupe_key,
+           dedupe_key = excluded.dedupe_key, apply_url = excluded.apply_url,
            company = excluded.company, title = excluded.title, url = excluded.url, locations = excluded.locations,
            remote = excluded.remote, posted_at = excluded.posted_at, description = excluded.description,
            level = excluded.level, score = excluded.score, reasons = excluded.reasons,
@@ -154,6 +179,7 @@ export class Store {
         job.id, job.source, job.company, job.title, job.url, JSON.stringify(job.locations), job.remote ? 1 : 0,
         job.postedAt, job.description, rated.level, rated.score, JSON.stringify(rated.reasons), rated.filteredReason, at, at,
         dedupeKey(job),
+        job.applyUrl ?? null,
       );
     if (isNew) this.addEvent(job.id, "seen", "", now);
     return isNew;
@@ -235,6 +261,41 @@ export class Store {
       }))
       .filter((f) => f.days >= afterDays)
       .sort((a, b) => b.days - a.days || b.job.score - a.job.score);
+  }
+
+  /** Records one go at a job's form. */
+  addApplication(a: { jobId: string; mode: "dry" | "submit"; state: ApplicationState; detail: string; fields: unknown }, now = new Date()): void {
+    this.db
+      .prepare("INSERT INTO applications (job_id, at, mode, state, detail, fields) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(a.jobId, now.toISOString(), a.mode, a.state, a.detail, JSON.stringify(a.fields));
+  }
+
+  /** Every go at forms, newest first; one job's when `jobId` is given. */
+  applications(jobId?: string, limit = 50): Application[] {
+    const rows = (jobId
+      ? this.db.prepare("SELECT * FROM applications WHERE job_id = ? ORDER BY id DESC LIMIT ?").all(jobId, limit)
+      : this.db.prepare("SELECT * FROM applications ORDER BY id DESC LIMIT ?").all(limit)) as Record<string, any>[];
+    return rows.map((r) => ({ id: r.id, jobId: r.job_id, at: r.at, mode: r.mode, state: r.state, detail: r.detail, fields: JSON.parse(r.fields) }));
+  }
+
+  /**
+   * Whether a job's form was sent, or may have been: submitted, waiting on
+   * you, or clicked without a confirmation. Such a job is never sent again.
+   */
+  wasSent(jobId: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 FROM applications WHERE job_id = ? AND state IN ('submitted', 'needs_you', 'unconfirmed') LIMIT 1")
+      .get(jobId);
+  }
+
+  /** Applications sent since local midnight. */
+  sentToday(now = new Date()): number {
+    const midnight = new Date(now);
+    midnight.setHours(0, 0, 0, 0);
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM applications WHERE state IN ('submitted', 'needs_you', 'unconfirmed') AND at >= ?")
+      .get(midnight.toISOString()) as { n: number };
+    return row.n;
   }
 
   /** A cached rating, by `ratingKey`. */

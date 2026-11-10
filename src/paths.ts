@@ -12,4 +12,6 @@ export const PATHS = {
   companies: path.join(DATA, "companies.json"),
   companiesExample: path.join(ROOT, "data", "companies.example.json"),
   db: path.join(DATA, "jobs.db"),
+  /** The apply browser's own profile: its cookies and sign-ins, apart from your everyday browser. */
+  browser: path.join(DATA, "browser"),
 } as const;
