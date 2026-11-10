@@ -29,9 +29,11 @@ For each blob id of a fillable job, download it with the `Artifact` tool: action
 Run in the background (it can take 10 minutes or more) and wait for it to finish:
 
 ```bash
-npm run job -- daily --headless --submit      # sending
-npm run job -- daily --headless               # dry run: nothing is sent
+npm run job -- daily --submit                 # sending, in a visible Chrome window
+npm run job -- daily                          # dry run: nothing is sent
 ```
+
+Use a visible window, not `--headless`: some boards (Ashby) show a robot check to a hidden browser and let a visible one through. The window pops up and fills forms by itself; it must not be clicked in or closed while it runs.
 
 It fills each form and checks every value, sends only forms that checked out (up to `apply.maxPerDay`), and uses the day's own resume and cover letter. If fewer than 10 can be filled, it adds the best new jobs from the user's own boards. Jobs it cannot fill, and forms that need the user, are listed in `data/rhythm/result.json` and on the dashboard's Needs you list. Do not re-run `--submit` after a failure without reading `result.json`: a job may already be sent.
 

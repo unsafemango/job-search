@@ -119,7 +119,7 @@ Every score is stored with its four parts (title, skills or model fit, location,
 4. If fewer than 10 can be filled, it looks for new jobs on your own boards and adds the best, with your own resume (and a written cover letter when the form has a box for one).
 5. It ticks each sent job in the page, deletes the PDFs it used, and reports what it sent and what needs you.
 
-With nobody at the window, a form that shows a robot check is left for you rather than sent. Run `daily` without `--submit` for a dry run. Everything is in `data/rhythm/`, which is git-ignored.
+It runs in a visible Chrome window, because some boards (Ashby) flag a hidden one with a robot check. A form that still shows one (Lever's hCaptcha) is left for you rather than sent, and `--headless` is for when no screen is available. Run `daily` without `--submit` for a dry run. Everything is in `data/rhythm/`, which is git-ignored.
 
 ### Resumes and cover letters for each job
 
