@@ -15,8 +15,8 @@ Sending is only for a run that was told to send (the user said "send", or the sc
 2. Today's date in Toronto: `TZ=America/Toronto date +%F`. Call it `<date>`.
 3. Load the database tool: ToolSearch `select:ArtifactData`.
 4. `ArtifactData` get, collection `jobs`, doc_id `<date>`, `out_dir` = `data/rhythm/raw` (absolute path). If there is no such document, the job finder has not posted yet: say so, and stop. Do not apply to anything.
-5. Copy `data/rhythm/raw/jobs/<date>.json` to `data/rhythm/jobs.json`.
-6. Find which of today's jobs are already ticked in the page: `ArtifactData` query, collection `applied`, `where` `[["jobId","in",[<today's ten item ids>]]]` (the ids are the `id` fields of the items, like `1110-03`). Write the ids found to `data/rhythm/applied.json` as a JSON list (an empty list `[]` if none). Never list the whole collection: it is large.
+5. Copy `data/rhythm/raw/jobs/<date>.json` to `data/rhythm/jobs.json`. Use only today's jobs. Do not add jobs from earlier days to reach ten: the user may already have applied to them by hand and ticked them.
+6. Find which of the jobs in `data/rhythm/jobs.json` are already ticked in the page, whatever day they came from: `ArtifactData` query, collection `applied`, `where` `[["jobId","in",[<every item id in the file>]]]` (the ids are the `id` fields of the items, like `1110-03`; keep each query to 30 ids and run as many as needed). Write the ids found to `data/rhythm/applied.json` as a JSON list (an empty list `[]` if none). Never list the whole collection: it is large. A job the user ticked by hand has already been applied to, and must never be applied to again.
 
 ## 2. Get the PDFs the finder already wrote
 
