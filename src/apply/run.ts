@@ -184,6 +184,11 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       notes.push(`${job.id}: waiting on the security code emailed to you (${job.company}: ${job.title}); finish it yourself`);
       continue;
     }
+    const earlier = store.duplicateOfEarlier(job.id);
+    if (earlier) {
+      notes.push(`${job.id}: the same application form as ${earlier} (${job.company}: ${job.title}); opened there, not again here`);
+      continue;
+    }
     if (!job.applyUrl) {
       record({ state: "blocked", detail: `no form the tool can fill (${job.source} is not supported yet); apply at ${job.url}`, fields: [], leftOpen: false });
       continue;

@@ -400,7 +400,8 @@ program
   .option("--no-top-up", "do not add jobs from your own boards when the day's list has fewer fillable jobs")
   .option("--no-discover", "do not look for new jobs on your own boards first")
   .option("--plan", "only print which of the day's jobs can be filled and which PDFs are needed, as JSON")
-  .action(async (file: string | undefined, opts: { count?: string; submit?: boolean; headless?: boolean; topUp: boolean; discover: boolean; plan?: boolean }) => {
+  .option("--retry", "try again the jobs that were left for you earlier (after you have fixed what was missing)")
+  .action(async (file: string | undefined, opts: { count?: string; submit?: boolean; headless?: boolean; topUp: boolean; discover: boolean; plan?: boolean; retry?: boolean }) => {
     const profile = loadProfile(PATHS.profile);
     const jobsFile = file ?? path.join(PATHS.rhythm, "jobs.json");
     const filesDir = path.join(PATHS.rhythm, "files");
@@ -414,7 +415,7 @@ program
     let session: Awaited<ReturnType<typeof openSession>> | null = null;
     try {
       if (opts.plan) {
-        const plan = doc ? planDaily(store, doc, appliedIds) : { date: "", fillable: [], skipped: [] };
+        const plan = doc ? planDaily(store, doc, appliedIds, new Date(), !!opts.retry) : { date: "", fillable: [], skipped: [] };
         const out = {
           date: plan.date,
           fillable: plan.fillable.slice(0, count).map((e) => ({ id: e.item.id, company: e.item.company, role: e.item.role, resumeBlob: blobId(e.item.resumePdf), coverBlob: blobId(e.item.coverPdf) })),
@@ -433,6 +434,7 @@ program
         // With a hidden window, or no terminal to wait in, nobody can pass a robot check: it is left for you.
         headless: !!opts.headless || !process.stdin.isTTY,
         topUp: opts.topUp,
+        retry: !!opts.retry,
         refresh: opts.discover
           ? async () => {
               console.log("Looking for new jobs on your own boards...");

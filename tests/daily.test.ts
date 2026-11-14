@@ -114,6 +114,50 @@ describe("planning the day", () => {
   });
 });
 
+describe("one posting, many ids", () => {
+  const same = (id: string, at: Date, over: Partial<Job> = {}): Job => ({ id, source: "greenhouse", company: "Acme", title: "Senior Java Developer", url: `https://x/${id}`, applyUrl: GH(1), locations: ["Toronto"], remote: false, postedAt: null, description: "", ...over });
+  const rated = { level: "senior", score: 80, reasons: [] as string[], filteredReason: null };
+  const day = (n: number) => new Date(Date.UTC(2026, 10, n));
+
+  it("deals with one id per form: the one already tried first, else the earliest seen", () => {
+    const store = new Store(":memory:");
+    store.upsert(same("first001", day(1)), rated, day(1));
+    store.upsert(same("second01", day(2)), rated, day(2));
+    store.upsert(same("third001", day(3)), rated, day(3));
+    store.upsert(same("otherform", day(1), { applyUrl: GH(2) }), rated, day(1));
+    expect(store.duplicateOfEarlier("first001")).toBeNull();
+    expect(store.duplicateOfEarlier("second01")).toBe("first001");
+    expect(store.duplicateOfEarlier("third001")).toBe("first001");
+    expect(store.duplicateOfEarlier("otherform")).toBeNull();
+    // A copy that was already tried comes first, so work already done is not lost.
+    store.addApplication({ jobId: "third001", mode: "submit", state: "left_for_you", detail: "", fields: [] }, day(4));
+    expect(store.duplicateOfEarlier("third001")).toBeNull();
+    expect(store.duplicateOfEarlier("first001")).toBe("third001");
+    // Tried on all three: still only one is dealt with.
+    store.addApplication({ jobId: "first001", mode: "submit", state: "left_for_you", detail: "", fields: [] }, day(5));
+    store.addApplication({ jobId: "second01", mode: "submit", state: "left_for_you", detail: "", fields: [] }, day(5));
+    expect([store.duplicateOfEarlier("first001"), store.duplicateOfEarlier("second01"), store.duplicateOfEarlier("third001")].filter((x) => x === null)).toHaveLength(1);
+    store.close();
+  });
+
+  it("does not plan a copy, nor a job already left for you, unless asked to retry", () => {
+    const store = new Store(":memory:");
+    const doc = parseRhythm(JSON.stringify({ date: "2026-11-10", items: [item("1110-01", GH(21)), item("1110-02", GH(21)), item("1110-03", GH(23))] }));
+    const first = planDaily(store, doc, [], day(10));
+    // Two items are the same form: only one is planned.
+    expect(first.fillable.map((e) => e.item.id)).toEqual(["1110-01", "1110-03"]);
+    expect(first.skipped.map((s) => [s.item.id, s.reason])).toEqual([["1110-02", expect.stringContaining("the same form")]]);
+
+    store.addApplication({ jobId: first.fillable[0]!.job.id, mode: "submit", state: "left_for_you", detail: "needs an answer", fields: [] }, day(10));
+    const next = planDaily(store, doc, [], day(11));
+    expect(next.fillable.map((e) => e.item.id)).toEqual(["1110-03"]);
+    expect(next.skipped.find((s) => s.item.id === "1110-01")?.reason).toContain("left for you");
+    // After you have fixed what was missing: --retry tries it again.
+    expect(planDaily(store, doc, [], day(11), true).fillable.map((e) => e.item.id)).toEqual(["1110-01", "1110-03"]);
+    store.close();
+  });
+});
+
 /** A form shaped like Greenhouse's, with a cover letter box, served for the board's address. */
 const FORM = `<!doctype html><html><body>
 <form id="app" onsubmit="event.preventDefault(); document.body.innerHTML = '<h1>Thank you for applying!</h1>';">

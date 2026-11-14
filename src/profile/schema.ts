@@ -47,6 +47,11 @@ export const ProfileSchema = z.object({
       firstName: z.string().default(""),
       lastName: z.string().default(""),
       preferredName: z.string().default(""),
+      /** Your legal name, for forms that ask for it apart from the name you go by. */
+      legalFirstName: z.string().default(""),
+      legalLastName: z.string().default(""),
+      /** How to say your name, for forms that ask. */
+      namePronunciation: z.string().default(""),
       email: z.string().default(""),
       phone: z.string().default(""),
       city: z.string().default(""),

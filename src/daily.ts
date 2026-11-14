@@ -80,7 +80,7 @@ export type Plan = { date: string; fillable: PlanEntry[]; skipped: Skipped[] };
  * sent (even as another posting of the same job or the same form). Pure
  * apart from storing the jobs.
  */
-export function planDaily(store: Store, doc: RhythmDoc, appliedIds: string[], now = new Date()): Plan {
+export function planDaily(store: Store, doc: RhythmDoc, appliedIds: string[], now = new Date(), retry = false): Plan {
   const fillable: PlanEntry[] = [];
   const skipped: Skipped[] = [];
   const stored = doc.items.map((item) => {
@@ -94,6 +94,8 @@ export function planDaily(store: Store, doc: RhythmDoc, appliedIds: string[], no
     else if (store.wasSent(job.id) || store.sentDuplicate(job.id)) skip("already applied to");
     else if (store.awaitingCode(job.id)) skip("already tried: it emailed you a security code to finish yourself");
     else if (!job.applyUrl) skip(`${new URL(item.apply).host} is not a board the app can fill`);
+    else if (store.duplicateOfEarlier(job.id)) skip(`already looked at under ${store.duplicateOfEarlier(job.id)}: the same form`);
+    else if (!retry && store.leftForYou(job.id)) skip("already tried and left for you; fix it, then run daily --retry");
     else fillable.push({ item, job });
   }
   return { date: doc.date, fillable, skipped };
@@ -106,7 +108,7 @@ export function pickTopUp(store: Store, need: number, exclude: StoredJob[]): Sto
   const ids = new Set(exclude.map((j) => j.id));
   return store
     .visible(["shortlisted", "new"], 2000)
-    .filter((j) => j.applyUrl && !ids.has(j.id) && !taken.has(j.applyUrl) && store.applications(j.id, 1).length === 0 && !store.sentDuplicate(j.id))
+    .filter((j) => j.applyUrl && !ids.has(j.id) && !taken.has(j.applyUrl) && store.applications(j.id, 1).length === 0 && !store.sentDuplicate(j.id) && !store.duplicateOfEarlier(j.id))
     .sort((a, b) => (a.status === "shortlisted" ? 0 : 1) - (b.status === "shortlisted" ? 0 : 1) || b.score - a.score)
     .slice(0, need);
 }
@@ -133,6 +135,8 @@ export type DailyOptions = {
   headless: boolean;
   /** Add jobs from your own boards when the day's list has fewer fillable jobs than `count`. */
   topUp: boolean;
+  /** Try jobs again that were left for you earlier (after you have fixed what was missing). */
+  retry?: boolean;
   /** Called once, only if a top-up is needed, to find new jobs first. */
   refresh?: () => Promise<void>;
   session: ApplyOptions["session"];
@@ -144,7 +148,7 @@ export type DailyOptions = {
 
 export async function runDaily(store: Store, profile: Profile, opts: DailyOptions): Promise<{ results: DailyResult[]; skipped: Skipped[]; notes: string[]; stopped: string | null }> {
   const log = opts.log ?? (() => {});
-  const plan = opts.doc ? planDaily(store, opts.doc, opts.appliedIds, opts.now) : { date: "", fillable: [], skipped: [] };
+  const plan = opts.doc ? planDaily(store, opts.doc, opts.appliedIds, opts.now, opts.retry) : { date: "", fillable: [], skipped: [] };
   const todo = plan.fillable.slice(0, opts.count);
   const itemOf = new Map(todo.map((e) => [e.job.id, e.item]));
 

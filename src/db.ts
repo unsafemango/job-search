@@ -335,6 +335,31 @@ export class Store {
     return !!row;
   }
 
+  /**
+   * The id of another job for the very same application form that should be dealt with instead of this one, or
+   * null. Of the jobs sharing a form, the one already looked at comes first, then the one seen first; the rest
+   * are copies, not opened again (a posting listed under three ids used to open three tabs).
+   */
+  duplicateOfEarlier(id: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT j.id FROM jobs me JOIN jobs j ON j.apply_url = me.apply_url AND j.id <> me.id
+         WHERE me.id = ? AND me.apply_url IS NOT NULL AND j.status <> 'dismissed'
+           AND ((SELECT COUNT(*) > 0 FROM applications a WHERE a.job_id = j.id) > (SELECT COUNT(*) > 0 FROM applications a WHERE a.job_id = me.id)
+             OR ((SELECT COUNT(*) > 0 FROM applications a WHERE a.job_id = j.id) = (SELECT COUNT(*) > 0 FROM applications a WHERE a.job_id = me.id)
+                 AND (j.first_seen < me.first_seen OR (j.first_seen = me.first_seen AND j.rowid < me.rowid))))
+         LIMIT 1`,
+      )
+      .get(id) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  /** True when the last go at this job's form ended with it left for you (or no form could be filled). */
+  leftForYou(jobId: string): boolean {
+    const row = this.db.prepare("SELECT state FROM applications WHERE job_id = ? ORDER BY id DESC LIMIT 1").get(jobId) as { state: string } | undefined;
+    return !!row && ["left_for_you", "blocked", "rejected", "needs_you"].includes(row.state);
+  }
+
   /** True when the site emailed a security code for this job: it is unfinished and waits for you, so it is not tried again. */
   awaitingCode(jobId: string): boolean {
     return !!this.db.prepare("SELECT 1 FROM applications WHERE job_id = ? AND state = 'needs_code' LIMIT 1").get(jobId);
