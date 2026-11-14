@@ -29,12 +29,17 @@ export async function openForm(session: Session, url: string): Promise<{ page: P
   const page = await session.context.newPage();
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  return { page, dump: await readForm(page) };
+}
+
+/** Reads the form as it is now, with each dropdown's options. Field ids are handed out again from f0. */
+export async function readForm(page: Page): Promise<FormDump> {
   await page.evaluate("globalThis.__name = globalThis.__name || ((f) => f)");
   const dump = await page.evaluate(dumpForm);
   for (const field of dump.fields) {
     if (field.kind === "combobox" && field.options.length === 0) field.options = await comboOptions(page, field);
   }
-  return { page, dump };
+  return dump;
 }
 
 const at = (page: Page, field: FormField): Locator => page.locator(`[data-ja="${field.id}"]`).first();
@@ -59,6 +64,18 @@ const REGION_CODES: Record<string, string> = {
   canada: "can", "united states": "usa",
 };
 
+/** Whether `text` names a province or country other than the ones `parts` asks for ("Concord, Nova Scotia" when Ontario was asked). */
+function namesOtherRegion(text: string, parts: string[]): boolean {
+  const asked = parts.slice(1);
+  if (!asked.some((p) => REGION_CODES[p] !== undefined && p !== "canada" && p !== "united states")) return false;
+  const lower = text.toLowerCase();
+  const w = new Set(lower.split(/[^a-z0-9]+/).filter(Boolean));
+  return Object.entries(REGION_CODES).some(([name, code]) => {
+    if (name === "canada" || name === "united states" || asked.includes(name)) return false;
+    return lower.includes(name) || (code.length === 2 && w.has(code) && !asked.some((p) => REGION_CODES[p] === code));
+  });
+}
+
 /**
  * The suggestion that best fits a place like "London, Ontario, Canada": it must
  * name the city, and the more of the region and country it names (in full or
@@ -74,6 +91,7 @@ export function bestSuggestion(value: string, texts: string[]): string | null {
   let best: { text: string; score: number } | null = null;
   for (const text of texts) {
     if (!text.toLowerCase().includes(city)) continue;
+    if (namesOtherRegion(text, parts)) continue;
     const w = words(text);
     let score = 0;
     for (const p of parts.slice(1)) if (text.toLowerCase().includes(p) || (REGION_CODES[p] && w.has(REGION_CODES[p]!))) score++;
@@ -93,6 +111,7 @@ export function samePlace(shows: string, value: string): boolean {
   const s = shows.toLowerCase();
   if (!parts[0] || !s.includes(parts[0])) return false;
   if (parts.length === 1) return true;
+  if (namesOtherRegion(shows, parts)) return false;
   const w = new Set(s.split(/[^a-z0-9]+/).filter(Boolean));
   return parts.slice(1).some((p) => s.includes(p) || (REGION_CODES[p] !== undefined && w.has(REGION_CODES[p]!)));
 }

@@ -142,6 +142,9 @@ describe("reading values back", () => {
     const texts = ["London, ENG, GBR", "London, ON, CAN", "London, KY, USA"];
     expect(bestSuggestion("London, Ontario, Canada", texts)).toBe("London, ON, CAN");
     expect(bestSuggestion("Toronto, Ontario, Canada", ["Toronto, OH, USA", "Toronto, ON, CAN"])).toBe("Toronto, ON, CAN");
+    // Never Concord, Nova Scotia for Concord, Ontario.
+    expect(bestSuggestion("Concord, Ontario, Canada", ["Concord, Nova Scotia, Canada"])).toBeNull();
+    expect(bestSuggestion("Concord, Ontario, Canada", ["Concord, Nova Scotia, Canada", "Concord, Ontario, Canada"])).toBe("Concord, Ontario, Canada");
     expect(bestSuggestion("Ottawa", ["Toronto, ON, CAN"])).toBeNull();
     // A city with the right name in the wrong country is not the place.
     expect(bestSuggestion("Guelph, Ontario, Canada", ["Guelph, CA, USA", "Guelph, NC, USA", "Guelph, NH, USA"])).toBeNull();
@@ -320,7 +323,7 @@ describe("the browser runner, on a local form", () => {
     expect(asked).toEqual([true]);
     expect(r.outcomes.map((o) => o.state)).toEqual(["ready"]);
     const coverResult = r.outcomes[0]!.fields.find((f) => f.label === "Cover Letter");
-    expect(coverResult).toMatchObject({ ok: true, shows: "Test_Person_Cover_Letter.pdf" });
+    expect(coverResult).toMatchObject({ ok: true, shows: "Test_Person_Acme_Software_Engineer_Cover_Letter.pdf" });
 
     const store2 = new Store(":memory:");
     ingest([{ ...job, applyUrl: `file://${coverForm}` }], profile, store2, NOW);
@@ -411,4 +414,80 @@ describe("a form built the way Ashby builds them", () => {
     expect(results.map((r) => [r.ok, r.shows])).toEqual([[true, "Test"], [true, "Yes"], [true, "JavaScript || Go"]]);
     await page.close();
   }, 60_000);
+});
+
+const SIMPLE = `<!doctype html><html><body>
+<form onsubmit="event.preventDefault(); document.body.innerHTML = '<h1>Thank you for applying!</h1>';">
+  <label for="first_name">First Name*</label><input id="first_name" required>
+  <label for="email">Email*</label><input id="email" type="email" required>
+  <button type="submit">Submit application</button>
+</form></body></html>`;
+const NEEDS_CODE = SIMPLE.replace("<h1>Thank you for applying!</h1>", "<p>We sent a verification code to your email. Enter the code to finish.</p>");
+
+describe("never sending twice, and an emailed code is not a sent application", () => {
+  let session: Session;
+  let formUrl: string;
+  let codeUrl: string;
+  beforeAll(async () => {
+    writeFileSync(path.join(dir, "simple.html"), SIMPLE);
+    writeFileSync(path.join(dir, "code.html"), NEEDS_CODE);
+    formUrl = `file://${path.join(dir, "simple.html")}`;
+    codeUrl = `file://${path.join(dir, "code.html")}`;
+    session = await openSession(path.join(dir, "browser-twice"), { headless: true });
+  }, 60_000);
+  afterAll(async () => session?.close());
+
+  const map = async (_j: unknown, fields: FormField[]) => ({
+    fields: fields.map((f) => ({ field: f, values: f.kind === "email" ? ["test@example.com"] : /first/i.test(f.label) ? ["Test"] : [] })),
+    problems: [] as string[],
+    verdict: "ready" as const,
+    reason: "",
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  });
+  const noDocs = async () => ({ resume: null, coverLetter: null, coverText: null });
+  const row = (id: string, url: string): Job => ({ ...job, id, title: `Engineer ${id}`, url: `https://x/${id}`, applyUrl: url });
+  const run = (store: Store, ids: string[]) => applyJobs(store, profile, { ids, submit: true, headless: true, session: async () => session, map, prepare: noDocs, sleep: async () => {} });
+
+  it("sends the same form once, whichever id it comes in under, in one run or the next", async () => {
+    const store = new Store(":memory:");
+    ingest([row("copy0001", formUrl), row("copy0002", formUrl)], profile, store, NOW);
+    const first = await run(store, ["copy0001", "copy0002"]);
+    expect(first.outcomes.map((o) => [o.job.id, o.state])).toEqual([["copy0001", "submitted"]]);
+    expect(first.notes).toEqual([expect.stringContaining("the same job was")]);
+    // Another run, by id: the same form under a third id is refused at the door.
+    ingest([row("copy0003", formUrl)], profile, store, NOW);
+    expect(pickJobs(store, { ids: ["copy0003"] }).jobs).toEqual([]);
+    expect(pickJobs(store, { ids: ["copy0003"] }).notes).toEqual([expect.stringContaining("not sent again")]);
+    store.close();
+  }, 90_000);
+
+  it("records a form that emailed a code as not finished: not sent, not counted, not tried again", async () => {
+    const store = new Store(":memory:");
+    ingest([row("code0001", codeUrl)], profile, store, NOW);
+    const r = await run(store, ["code0001"]);
+    expect(r.outcomes.map((o) => o.state)).toEqual(["needs_code"]);
+    expect(r.outcomes[0]!.detail).toContain("not finished");
+    expect(store.wasSent("code0001")).toBe(false);
+    expect(store.sentToday()).toBe(0);
+    expect(store.get("code0001")?.status).toBe("new");
+    expect(store.awaitingCode("code0001")).toBe(true);
+    // A second run does not open the form again, so no second code is emailed.
+    const again = await run(store, ["code0001"]);
+    expect(again.outcomes).toEqual([]);
+    expect(again.notes).toEqual([expect.stringContaining("security code")]);
+    store.close();
+  }, 90_000);
+
+  it("turns older needs_you rows that were an emailed code into needs_code when the store opens", () => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), "old-db-")), "jobs.db");
+    const store = new Store(file);
+    ingest([row("old00001", formUrl)], profile, store, NOW);
+    store.addApplication({ jobId: "old00001", mode: "submit", state: "needs_you", detail: "the site emailed you a code; type it in the window", fields: [] });
+    store.addApplication({ jobId: "old00001", mode: "submit", state: "needs_you", detail: "the site asked for a robot check", fields: [] });
+    expect(store.wasSent("old00001")).toBe(true);
+    store.close();
+    const reopened = new Store(file);
+    expect(reopened.applications("old00001").map((a) => a.state).sort()).toEqual(["needs_code", "needs_you"]);
+    reopened.close();
+  });
 });

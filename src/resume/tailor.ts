@@ -8,6 +8,7 @@
  * still fails after that is dropped, never sent.
  */
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import type { Job } from "../jobs/job.js";
 import { claudeCodeJson, type Runner } from "../model/claude-code.js";
@@ -78,7 +79,10 @@ const DEFAULT_VOICE = `Write the way a real person talks, a little cleaner. Easy
 
 export function loadVoice(file: string): string {
   // The first rules carry the voice; the avoid-list and style checks are enforced in code, not by repeating them here.
-  return existsSync(file) ? readFileSync(file, "utf8").replace(/^---[\s\S]*?---\s*/, "").slice(0, 4500) : DEFAULT_VOICE;
+  const voice = existsSync(file) ? readFileSync(file, "utf8").replace(/^---[\s\S]*?---\s*/, "").slice(0, 4500) : DEFAULT_VOICE;
+  // The resume and cover letter rules (from the yray-resume skill) sit next to the voice file.
+  const rules = path.join(path.dirname(file), "resume-rules.md");
+  return existsSync(rules) ? `${voice}\n\n${readFileSync(rules, "utf8")}` : voice;
 }
 
 export const ResumeDraftSchema = z.object({
@@ -106,7 +110,7 @@ Write it for this job:
 - headline: a role name the candidate can truthfully claim from their own titles (like "Backend Developer" or "Full Stack Developer"; never the job's own title or a seniority they have not held), then the 3 to 5 skills from the facts that matter most for this job, like "Backend Developer · Java/Spring Boot, Kafka, SQL, Microservices".
 - summary: 2 to 4 short plain sentences in the first person without "I am a", leading with what this job needs most.
 - skills: 3 to 5 groups, most relevant first, each with only items from the resume or facts.
-- experience: roles by index, most recent first. 2 to 7 bullets for each role you keep, most relevant first, reworded toward the posting but saying only what the facts say. Leave out a role that does not help this job, except the current one.
+- experience: roles by index, most recent first. 5 to 7 bullets for the current role, 2 to 3 for each other role, and exactly 1 for a teaching or lecturer role; most relevant first, reworded toward the posting but saying only what the facts say. Keep every role, newest first. Do not leave a role out.
 - projects: up to 3, by index, each as one sentence or two from its facts, starting with the stack in parentheses, without repeating the project's name (it is shown before your text).
 - keywords: posting words the resume now uses. gaps: what the posting asks for that the facts do not show. numbersToAdd: up to 3 questions whose answers would add a real number.
 
@@ -179,16 +183,22 @@ export function assembleResume(resume: Resume, draft: ResumeDraft): WrittenResum
     if (bad.length) dropped.push(`${t.slice(0, 80)}${t.length > 80 ? "…" : ""} (${bad.join(", ")})`);
     return bad.length === 0;
   };
-  const roles = draft.experience
+  const drafted = draft.experience
     .filter((e) => e.role >= 0 && e.role < resume.experience.length)
-    .filter((e, i, all) => all.findIndex((x) => x.role === e.role) === i)
+    .filter((e, i, all) => all.findIndex((x) => x.role === e.role) === i);
+  const roles = drafted
     .map((e) => {
       const base = resume.experience[e.role]!;
       const bullets = e.bullets.map(strip).filter(Boolean).filter(ok);
       return { ...base, bullets: bullets.length ? bullets : base.bullets.slice(0, 2) };
     });
-  // The current role always stays.
-  if (resume.experience.length && !draft.experience.some((e) => e.role === 0)) roles.unshift(resume.experience[0]!);
+  // Every role stays, and they run newest first, in the order of the resume. A role the draft skipped (the lecturer job,
+  // for one) comes back with its own bullets; the page-fit trim shortens bullets, it never removes a role.
+  const kept = new Map(drafted.map((e, i) => [e.role, roles[i]!] as const));
+  const all = resume.experience.map((base, i) => kept.get(i) ?? { ...base, bullets: base.bullets.slice(0, 2) });
+  // One bullet is enough for the lecturer job; the room goes to the current role.
+  for (const r of all) if (/lecturer/i.test(r.title)) r.bullets = r.bullets.slice(0, 1);
+  roles.splice(0, roles.length, ...all);
   const projects = draft.projects
     .filter((p) => p.project >= 0 && p.project < resume.projects.length)
     .map((p) => {

@@ -20,6 +20,12 @@ const fileName = (profile: Profile, what: string) => {
 };
 export const resumeName = (profile: Profile) => fileName(profile, "Resume");
 export const coverLetterName = (profile: Profile) => fileName(profile, "Cover_Letter");
+/** The name a file shows on the application: Yray_Akemu_<Company>_<Role>_Resume.pdf. */
+export const uploadName = (profile: Profile, job: { company: string; title: string }, what: "Resume" | "Cover_Letter") => {
+  const who = [profile.contact.firstName, profile.contact.lastName].filter(Boolean).join("_") || "My";
+  const part = (t: string) => t.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 50);
+  return `${who}_${part(job.company)}_${part(job.title)}_${what}.pdf`.replace(/[^\w.-]+/g, "_");
+};
 
 export function documentsDir(jobId: string): string {
   return path.join(PATHS.tailored, jobId);
@@ -38,11 +44,18 @@ export function existingDocuments(profile: Profile, jobId: string): { resume: st
  */
 export function trimOnce(r: Resume): Resume | null {
   if (r.projects.length > 1) return { ...r, projects: r.projects.slice(0, -1) };
-  let most = -1;
-  r.experience.forEach((e, i) => {
-    if (e.bullets.length > 1 && (most < 0 || e.bullets.length > r.experience[most]!.bullets.length)) most = i;
-  });
-  if (most < 0) return r.projects.length ? { ...r, projects: [] } : null;
+  // Older roles give up bullets first (the one with the most); the current role, the first, keeps its bullets longest.
+  const pick = (from: number): number => {
+    let most = -1;
+    r.experience.forEach((e, i) => {
+      if (i >= from && e.bullets.length > 1 && (most < 0 || e.bullets.length > r.experience[most]!.bullets.length)) most = i;
+    });
+    return most;
+  };
+  let most = pick(1);
+  if (most < 0 && r.projects.length) return { ...r, projects: [] };
+  if (most < 0) most = pick(0);
+  if (most < 0) return null;
   return { ...r, experience: r.experience.map((e, i) => (i === most ? { ...e, bullets: e.bullets.slice(0, -1) } : e)) };
 }
 
@@ -57,7 +70,7 @@ export async function prepareDocuments(job: Job, profile: Profile, opts: { cover
   const resumeFile = path.join(dir, resumeName(profile));
   let resume = written.resume;
   let pages = await renderPdf(resume, resumeFile);
-  for (let next = trimOnce(resume); pages > 2 && next; next = trimOnce(resume)) {
+  for (let next = trimOnce(resume); pages > 1 && next; next = trimOnce(resume)) {
     resume = next;
     pages = await renderPdf(resume, resumeFile);
   }
@@ -98,4 +111,11 @@ export function deleteDocuments(jobId: string): boolean {
 /** Job ids that have documents. */
 export function jobsWithDocuments(): string[] {
   return existsSync(PATHS.tailored) ? readdirSync(PATHS.tailored) : [];
+}
+
+/** Deletes the working copies of every job that is already applied (sent by the tool or by you). Returns how many folders went. */
+export function deleteAppliedDocuments(isApplied: (jobId: string) => boolean): number {
+  let n = 0;
+  for (const id of jobsWithDocuments()) if (isApplied(id) && deleteDocuments(id)) n++;
+  return n;
 }

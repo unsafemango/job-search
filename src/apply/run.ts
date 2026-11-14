@@ -13,8 +13,8 @@ import { PATHS, ROOT } from "../paths.js";
 import { loadResume, sourceText } from "../resume/schema.js";
 import { loadVoice } from "../resume/tailor.js";
 import type { Profile } from "../profile/schema.js";
-import { coverLetterName, coverLetterText, deleteDocuments, existingDocuments, prepareDocuments, resumeName } from "../resume/documents.js";
-import { fillForm, isLocationField, openForm, submitForm, type FieldResult, type Session, type Uploads } from "./browser.js";
+import { coverLetterName, coverLetterText, deleteDocuments, existingDocuments, prepareDocuments, resumeName, uploadName } from "../resume/documents.js";
+import { fillForm, isLocationField, openForm, readForm, submitForm, type FieldResult, type Session, type Uploads } from "./browser.js";
 import type { FormField } from "./form.js";
 import { checkPlan, isCoverField, planJsonSchema, PlanSchema, promptFor, SYSTEM, type CoverAnswer, type MappedForm, type Remembered } from "./map.js";
 
@@ -125,7 +125,8 @@ export function pickJobs(store: Store, opts: { ids?: string[]; count?: number })
     for (const id of opts.ids) {
       const job = store.get(id);
       if (!job) notes.push(`${id}: no such job`);
-      else if (store.wasSent(id)) notes.push(`${id}: already sent (${job.company}: ${job.title}), not sent again`);
+      else if (store.wasSent(id) || store.sentDuplicate(id)) notes.push(`${id}: already sent (${job.company}: ${job.title}), or the same job was; not sent again`);
+      else if (store.awaitingCode(id)) notes.push(`${id}: waiting on the security code emailed to you (${job.company}: ${job.title}); finish it yourself`);
       else jobs.push(job);
     }
     return { jobs, notes };
@@ -173,6 +174,16 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       outcomes.push({ job, ...o });
       log(`${job.id}  ${o.state.toUpperCase().replace("_", " ")}  ${job.company}: ${job.title}\n           ${o.detail}`);
     };
+    // The last look before opening a form, for every way in (daily, apply by id, a top-up): the same job
+    // may have been sent since this run was planned, under another id or in another run.
+    if (store.wasSent(job.id) || store.sentDuplicate(job.id)) {
+      notes.push(`${job.id}: already sent (${job.company}: ${job.title}), or the same job was; not sent again`);
+      continue;
+    }
+    if (store.awaitingCode(job.id)) {
+      notes.push(`${job.id}: waiting on the security code emailed to you (${job.company}: ${job.title}); finish it yourself`);
+      continue;
+    }
     if (!job.applyUrl) {
       record({ state: "blocked", detail: `no form the tool can fill (${job.source} is not supported yet); apply at ${job.url}`, fields: [], leftOpen: false });
       continue;
@@ -207,8 +218,8 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
           ? { id: coverField.id, values: coverField.kind === "file" ? ["cover_letter"] : docs.coverText ? [docs.coverText] : [] }
           : undefined;
       const uploads: Uploads = {
-        resume: { path: docs.resume ?? resume, name: docs.resumeName ?? resumeName(profile) },
-        ...(docs.coverLetter ? { cover: { path: docs.coverLetter, name: docs.coverName ?? coverLetterName(profile) } } : {}),
+        resume: { path: docs.resume ?? resume, name: docs.resumeName ?? uploadName(profile, job, "Resume") },
+        ...(docs.coverLetter ? { cover: { path: docs.coverLetter, name: docs.coverName ?? uploadName(profile, job, "Cover_Letter") } } : {}),
       };
 
       const questions = dump.fields.filter(isQuestion).map((f) => f.label);
@@ -223,10 +234,26 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       }
       // A location box that picks from a list may not have your city: nearby places from your profile are tried after it.
       for (const plan of mapped.fields) {
-        if (isLocationField(plan.field) && plan.values.length) plan.values = [...plan.values, ...profile.contact.fallbackLocations];
+        if (isLocationField(plan.field) && plan.values.length) {
+          // Vaughan first, then Concord, then Toronto; never a place the model made up in another province.
+          const mine = [...profile.contact.fallbackLocations, ...plan.values.filter((v) => !/nova scotia|\bNS\b/i.test(v))];
+          plan.values = [...new Set(mine)];
+        }
       }
       const results = await fillForm(page, mapped.fields, uploads);
       const problems = [...mapped.problems, ...unread];
+      // Answering one question can make new ones appear (answering "Hispanic/Latino" brings up "race"). The page
+      // is read again and any new question is answered and filled, a few times over for questions that chain.
+      const seen = new Set(dump.fields.map((f) => `${f.kind}|${f.label}`));
+      for (let pass = 0; pass < 3; pass++) {
+        const again = await readForm(page);
+        const fresh = again.fields.filter((f) => !seen.has(`${f.kind}|${f.label}`) && f.kind !== "file");
+        if (!fresh.length) break;
+        for (const f of fresh) seen.add(`${f.kind}|${f.label}`);
+        const more = await map(job, fresh, profile, store.recall(fresh.filter(isQuestion).map((f) => f.label)), undefined);
+        problems.push(...more.problems);
+        results.push(...(await fillForm(page, more.fields, uploads)));
+      }
       // A field you did not have to fill, left empty by the page, is not worth holding the application for;
       // one that shows a different value than wanted is.
       for (const r of results) if (!r.ok && (r.required || r.shows)) problems.push(`"${r.label}" shows "${r.shows}" instead of "${r.wanted}"`);
@@ -249,6 +276,17 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       const sent = await submitForm(page, dump.submit);
       lastSent = Date.now();
       // With nobody at the window a robot check cannot be passed; it was not sent, so it stays open to try again.
+      // A form that emailed a security code is not finished and not sent: it waits for you, and is never tried again.
+      if (sent.state === "needs_you" && /code/i.test(sent.detail)) {
+        if (opts.headless) await page.close();
+        record({
+          state: "needs_code",
+          detail: `the site emailed a security code to you, so this application is not finished. Enter the code yourself at ${job.url}`,
+          fields: results,
+          leftOpen: !opts.headless,
+        });
+        continue;
+      }
       if (opts.headless && sent.state === "needs_you" && /robot check/i.test(sent.detail)) {
         await page.close();
         record({ state: "left_for_you", detail: `${sent.detail}. Apply yourself at ${job.url}`, fields: results, leftOpen: false });

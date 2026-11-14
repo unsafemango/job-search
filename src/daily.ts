@@ -92,6 +92,7 @@ export function planDaily(store: Store, doc: RhythmDoc, appliedIds: string[], no
     const skip = (reason: string) => skipped.push({ item, job, reason });
     if (appliedIds.includes(item.id)) skip("already ticked as applied in your Weekly Rhythm");
     else if (store.wasSent(job.id) || store.sentDuplicate(job.id)) skip("already applied to");
+    else if (store.awaitingCode(job.id)) skip("already tried: it emailed you a security code to finish yourself");
     else if (!job.applyUrl) skip(`${new URL(item.apply).host} is not a board the app can fill`);
     else fillable.push({ item, job });
   }
@@ -119,6 +120,8 @@ export type DailyResult = {
   state: string;
   detail: string;
   apply: string;
+  /** The form's tab was left open in the window for you to finish. */
+  leftOpen?: boolean;
 };
 
 export type DailyOptions = {
@@ -215,6 +218,7 @@ export async function runDaily(store: Store, profile: Profile, opts: DailyOption
     state: o.state,
     detail: o.detail,
     apply: o.job.url,
+    leftOpen: o.leftOpen,
   }));
   return { results, skipped: plan.skipped, notes: applied.notes, stopped: applied.stopped };
 }

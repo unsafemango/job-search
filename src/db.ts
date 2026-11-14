@@ -32,7 +32,8 @@ export type ApplicationState =
   | "skipped" // the form wants something the tool does not give (a cover letter, references)
   | "blocked" // no form could be filled: a sign-in, an unsupported board, an error page
   | "submitted" // sent, and the page confirmed it
-  | "needs_you" // sent, waiting on a robot check or emailed code you finish in the window
+  | "needs_you" // Submit clicked, waiting on a robot check you finish in the window
+  | "needs_code" // the site emailed you a security code; the application is NOT finished until you type it, and is not retried
   | "rejected" // the page refused the submission
   | "unconfirmed"; // Submit was clicked but no confirmation was seen
 
@@ -179,6 +180,8 @@ export class Store {
       for (const r of rows) set.run(dedupeKey(fromRow(r)), r.id);
     }
     this.db.exec("CREATE INDEX IF NOT EXISTS jobs_by_dedupe_key ON jobs (dedupe_key)");
+    // An emailed code used to be recorded as needs_you, which counted as sent. It is not sent.
+    this.db.exec("UPDATE applications SET state = 'needs_code' WHERE state = 'needs_you' AND detail LIKE '%emailed you a code%'");
     if (!columns.includes("apply_url")) this.db.exec("ALTER TABLE jobs ADD COLUMN apply_url TEXT");
     if (!columns.includes("parts")) this.db.exec("ALTER TABLE jobs ADD COLUMN parts TEXT");
   }
@@ -330,6 +333,11 @@ export class Store {
       )
       .get(id);
     return !!row;
+  }
+
+  /** True when the site emailed a security code for this job: it is unfinished and waits for you, so it is not tried again. */
+  awaitingCode(jobId: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM applications WHERE job_id = ? AND state = 'needs_code' LIMIT 1").get(jobId);
   }
 
   /** Applications sent since local midnight. */

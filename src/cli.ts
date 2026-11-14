@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
@@ -16,7 +17,7 @@ import { rateJobs } from "./rate.js";
 import { openSession } from "./apply/browser.js";
 import { applyJobs } from "./apply/run.js";
 import { blobId, parseRhythm, planDaily, readJson, runDaily } from "./daily.js";
-import { prepareDocuments } from "./resume/documents.js";
+import { deleteAppliedDocuments, prepareDocuments } from "./resume/documents.js";
 import { createInterface } from "node:readline/promises";
 import { CSV_COLUMNS, parseCsvJobs } from "./sources/csv.js";
 import { loadCompanies } from "./sources/index.js";
@@ -24,6 +25,15 @@ import { loadCompanies } from "./sources/index.js";
 // Your API key can live in .env (git-ignored) instead of your shell.
 const ENV_FILE = path.join(ROOT, ".env");
 if (existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
+
+// A long run must not let the Mac sleep: caffeinate holds the display and the system awake until this process ends.
+if (process.platform === "darwin" && process.argv.some((a) => a === "apply" || a === "daily") && !process.argv.includes("--plan")) {
+  try {
+    spawn("caffeinate", ["-d", "-i", "-m", "-s", "-w", String(process.pid)], { stdio: "ignore", detached: true }).unref();
+  } catch {
+    // no caffeinate: the run still works
+  }
+}
 
 const program = new Command().name("job").description("Find well-matched jobs and track your applications.");
 
@@ -200,6 +210,7 @@ program
     const count = Number(opts.count);
     if (!Number.isInteger(count) || count < 1) throw new Error(`--count must be a whole number above 0, not "${opts.count}".`);
     const store = new Store(PATHS.db);
+    deleteAppliedDocuments((id) => store.get(id)?.status === "applied");
     let session: Awaited<ReturnType<typeof openSession>> | null = null;
     try {
       console.log(opts.submit ? "Applying, and sending each form that fills cleanly." : "Dry run: forms are filled and checked, nothing is sent.");
@@ -223,6 +234,14 @@ program
         const rl = createInterface({ input: process.stdin, output: process.stdout });
         await rl.question("Press Enter to close the browser. ");
         rl.close();
+      } else if (session && !opts.headless && open.length) {
+        // No terminal to wait in (a background run): keep the window until you close it.
+        const live = session as Awaited<ReturnType<typeof openSession>>;
+        console.log(`\nLeft ${open.length} form${open.length === 1 ? "" : "s"} open in the browser window for you. Close the window when you are done.`);
+        await new Promise<void>((resolve) => {
+          live.context.on("close", () => resolve());
+          setTimeout(resolve, 8 * 60 * 60 * 1000).unref();
+        });
       }
     } finally {
       await (session as Awaited<ReturnType<typeof openSession>> | null)?.close().catch(() => {});
@@ -391,6 +410,7 @@ program
     if (!doc) console.log(`No jobs file at ${jobsFile}; only jobs from your own boards will be used.`);
     const appliedIds = readJson<string[]>(path.join(PATHS.rhythm, "applied.json"), []);
     const store = new Store(PATHS.db);
+    if (!opts.plan) deleteAppliedDocuments((id) => store.get(id)?.status === "applied");
     let session: Awaited<ReturnType<typeof openSession>> | null = null;
     try {
       if (opts.plan) {
@@ -424,6 +444,7 @@ program
         log: (l) => console.log(l),
       });
       for (const s of r.skipped) console.log(`  Skipped ${s.item.company}: ${s.item.role} (${s.reason})`);
+      for (const n of r.notes) console.log(`  ${n}`);
       if (r.stopped) console.log(`Stopped: ${r.stopped}`);
       const tally = new Map<string, number>();
       for (const x of r.results) tally.set(x.state, (tally.get(x.state) ?? 0) + 1);
@@ -437,6 +458,16 @@ program
           2,
         ),
       );
+      // Forms that need you stay open in the window. The results are already saved, so wait here until you close it.
+      const left = r.results.filter((x) => x.leftOpen).length;
+      const live = session as Awaited<ReturnType<typeof openSession>> | null;
+      if (live && !opts.headless && left) {
+        console.log(`\nLeft ${left} form${left === 1 ? "" : "s"} open in the browser window for you. Close the window when you are done.`);
+        await new Promise<void>((resolve) => {
+          live.context.on("close", () => resolve());
+          setTimeout(resolve, 8 * 60 * 60 * 1000).unref();
+        });
+      }
     } finally {
       await (session as Awaited<ReturnType<typeof openSession>> | null)?.close().catch(() => {});
       store.close();

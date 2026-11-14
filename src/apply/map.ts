@@ -52,7 +52,9 @@ How to fill:
 - Location fields get the candidate's city, region and country. Phone fields get the phone as given.
 - Salary questions: use the standing answer for the job's level (senior for senior/lead titles, mid otherwise), as a plain number or a short range from it.
 - "How did you hear about us": the standing answer, or the closest option.
-- Optional free-text questions (why this company, anything else) stay empty, unless a remembered answer fits.
+- Never answer a question about why the candidate wants this job, company or role ("Why us?", "What interests you?"). Leave it empty: the candidate writes it himself.
+- Tick every confirmation box (acknowledge, understand, agree, consent), but never a signature or a marketing box.
+- Optional free-text questions (anything else) stay empty, unless a remembered answer fits.
 - A required written question (why this role, experience with a tool, bullets showing ability) gets a short answer written in the candidate's own voice, described below the facts. Draw it only from the facts: never claim a skill, tool, employer, number, title or result the facts do not state. If the facts cannot answer it honestly, leave it empty and set verdict to "needs_review". A required one gets two or three plain, specific sentences drawn only from the facts and the posting.
 - Leave optional fields empty when the facts do not cover them.
 
@@ -119,6 +121,11 @@ const SPONSOR = /sponsor/i;
 const AUTHORIZED_WITHOUT_SPONSORSHIP = /authori[sz]ed[^.?]*without[^.?]*sponsor|without[^.?]*sponsor[^.?]*authori[sz]ed/i;
 const AUTHORIZED = /(legally )?(authori[sz]ed|entitled|eligible|permitted)\b.*\bwork|right to work|work authori[sz]ation/i;
 const SIGNATURE = /signature|\be-?sign|sign (your|here)|type your (full )?(legal )?name to|by typing your name/i;
+/** "Why do you want to join us?": the candidate writes these himself, so the tool never answers them. */
+const WHY = /^\s*why\b|why (do|would|are) you[^.?]*(join|work|apply|interested|want)|what (interests|excites|attracts|draws) you|what appeals to you/i;
+/** A tick box that only confirms: acknowledge, understand, agree, consent. Never marketing, never a signature. */
+const CONSENT = /acknowledg|understand|\bagree|consent|\baccept|\bconfirm|^\s*yes\s*$/i;
+const MARKETING = /marketing|newsletter|promotion|offers|stay in touch/i;
 const YES = /^(yes|y|true)\b/i;
 const NO = /^(no|n|false)\b/i;
 
@@ -203,6 +210,14 @@ export function checkPlan(plan: Plan, fields: FormField[], job: Job, profile: Pr
         problems.push(`"${field.label}": the profile says you are ${ok ? "" : "not "}authorized to work in ${country}, but the answer was "${values[0]}"`);
         values = [];
       }
+    }
+
+    // Confirmation boxes are ticked: the candidate said to acknowledge, understand, agree and consent.
+    if (field.kind === "checkbox" && !values.length && CONSENT.test(question) && !MARKETING.test(question) && !SIGNATURE.test(question)) values = ["checked"];
+    // "Why us?" questions are the candidate's own to answer: left empty, and the form is left open for him.
+    if (WHY.test(field.label) && field.kind !== "select" && field.kind !== "radio" && field.kind !== "combobox") {
+      if (field.required || values.length) problems.push(`"${field.label.slice(0, 70)}" is a why question: left for you to answer`);
+      values = [];
     }
 
     if (field.required && values.length === 0) problems.push(`"${field.label}" is required and has no answer`);

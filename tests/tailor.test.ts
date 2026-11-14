@@ -79,11 +79,11 @@ describe("assembling a resume", () => {
     expect(r.summary).toBe("I've built TypeScript apps, mostly dashboards.");
   });
 
-  it("trims the least relevant bullet of the longest role, then projects", () => {
+  it("trims projects, then older roles, then projects entirely, and the current role last", () => {
     let r: typeof resume | null = resume;
     const steps: number[][] = [];
     while ((r = trimOnce(r!))) steps.push([...r.experience.map((e) => e.bullets.length), r.projects.length]);
-    expect(steps).toEqual([[3, 2, 1], [2, 2, 1], [1, 2, 1], [1, 1, 1], [1, 1, 0]]);
+    expect(steps).toEqual([[3, 2, 1], [3, 1, 1], [3, 1, 0], [2, 1, 0], [1, 1, 0]]);
   });
 
   it("writes notes with keywords, gaps and what was left out", () => {

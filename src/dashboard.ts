@@ -63,7 +63,7 @@ export function renderPage(store: Store, profile: Profile, key: string): string 
   const recent = store.applications(undefined, 200);
   const latest = new Map<string, (typeof recent)[number]>();
   for (const a of recent) if (!latest.has(a.jobId)) latest.set(a.jobId, a);
-  const needsYou = [...latest.values()].filter((a) => ["left_for_you", "needs_you", "unconfirmed", "rejected", "blocked"].includes(a.state));
+  const needsYou = [...latest.values()].filter((a) => ["left_for_you", "needs_you", "needs_code", "unconfirmed", "rejected", "blocked"].includes(a.state));
   const tracked = (["applied", "replied", "interview", "offer"] as const).flatMap((s) => store.list(s, 100));
   const due = new Set(store.followUps(profile.followUpAfterDays).map((f) => f.job.id));
   const sent = counts.applied + counts.replied + counts.interview + counts.offer + counts.rejected;

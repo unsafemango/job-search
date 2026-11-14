@@ -35,7 +35,7 @@ npm run job -- daily                          # dry run: nothing is sent
 
 Use a visible window, not `--headless`: some boards (Ashby) show a robot check to a hidden browser and let a visible one through. The window pops up and fills forms by itself; it must not be clicked in or closed while it runs.
 
-It fills each form and checks every value, sends only forms that checked out (up to `apply.maxPerDay`), and uses the day's own resume and cover letter. If fewer than 10 can be filled, it adds the best new jobs from the user's own boards. Jobs it cannot fill, and forms that need the user, are listed in `data/rhythm/result.json` and on the dashboard's Needs you list. Do not re-run `--submit` after a failure without reading `result.json`: a job may already be sent.
+It fills each form and checks every value, sends only forms that checked out (up to `apply.maxPerDay`), and uses the day's own resume and cover letter. If fewer than 10 can be filled, it adds the best new jobs from the user's own boards. Forms that need the user stay open in the Chrome window (only sent forms and forms with no form are closed), so the process keeps running after it writes `data/rhythm/result.json` until the user closes the window. Do not wait for it to exit: once the log shows `Left N forms open`, `result.json` is complete, so carry on with steps 4 and 5. Jobs it cannot fill, and forms that need the user, are listed in `data/rhythm/result.json` and on the dashboard's Needs you list. Do not re-run `--submit` after a failure without reading `result.json`: a job may already be sent.
 
 If the output says Claude Code is signed out, a usage limit was reached, or the browser could not start, stop and tell the user. Do not retry in a loop.
 
@@ -55,6 +55,7 @@ Keep it short, plain words, no em dashes:
 - how many were sent, with company and role;
 - for each job not sent, the reason in a few words and its apply link (Needs you), grouped as: board the app can't fill, form needs the user (a question, a robot check, a code), already applied;
 - anything unconfirmed (Submit clicked, no confirmation seen): tell the user to check their email before trying again;
+- anything with state `needs_code`: the site emailed the user a security code, so the application is NOT finished and is not counted as sent. Say so, with the apply link. Never read or enter the code;
 - one line on what is left for the user to do.
 
 Finally, delete `data/rhythm/raw` (the copies you downloaded) with `node -e 'require("fs").rmSync("data/rhythm/raw",{recursive:true,force:true})'`.
