@@ -64,7 +64,7 @@ const REGION_CODES: Record<string, string> = {
   canada: "can", "united states": "usa",
 };
 
-/** Whether `text` names a province or country other than the ones `parts` asks for ("Concord, Nova Scotia" when Ontario was asked). */
+/** Whether `text` names a province or country other than the ones `parts` asks for ("Guelph, Nova Scotia" when Ontario was asked). */
 function namesOtherRegion(text: string, parts: string[]): boolean {
   const asked = parts.slice(1);
   if (!asked.some((p) => REGION_CODES[p] !== undefined && p !== "canada" && p !== "united states")) return false;

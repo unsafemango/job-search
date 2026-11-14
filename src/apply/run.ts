@@ -235,7 +235,7 @@ export async function applyJobs(store: Store, profile: Profile, opts: ApplyOptio
       // A location box that picks from a list may not have your city: nearby places from your profile are tried after it.
       for (const plan of mapped.fields) {
         if (isLocationField(plan.field) && plan.values.length) {
-          // Vaughan first, then Concord, then Toronto; never a place the model made up in another province.
+          // Your own place first, then the nearby places from your profile; never a place made up in another province.
           const mine = [...profile.contact.fallbackLocations, ...plan.values.filter((v) => !/nova scotia|\bNS\b/i.test(v))];
           plan.values = [...new Set(mine)];
         }

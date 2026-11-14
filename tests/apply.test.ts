@@ -142,9 +142,9 @@ describe("reading values back", () => {
     const texts = ["London, ENG, GBR", "London, ON, CAN", "London, KY, USA"];
     expect(bestSuggestion("London, Ontario, Canada", texts)).toBe("London, ON, CAN");
     expect(bestSuggestion("Toronto, Ontario, Canada", ["Toronto, OH, USA", "Toronto, ON, CAN"])).toBe("Toronto, ON, CAN");
-    // Never Concord, Nova Scotia for Concord, Ontario.
-    expect(bestSuggestion("Concord, Ontario, Canada", ["Concord, Nova Scotia, Canada"])).toBeNull();
-    expect(bestSuggestion("Concord, Ontario, Canada", ["Concord, Nova Scotia, Canada", "Concord, Ontario, Canada"])).toBe("Concord, Ontario, Canada");
+    // Never Guelph, Nova Scotia for Guelph, Ontario.
+    expect(bestSuggestion("Guelph, Ontario, Canada", ["Guelph, Nova Scotia, Canada"])).toBeNull();
+    expect(bestSuggestion("Guelph, Ontario, Canada", ["Guelph, Nova Scotia, Canada", "Guelph, Ontario, Canada"])).toBe("Guelph, Ontario, Canada");
     expect(bestSuggestion("Ottawa", ["Toronto, ON, CAN"])).toBeNull();
     // A city with the right name in the wrong country is not the place.
     expect(bestSuggestion("Guelph, Ontario, Canada", ["Guelph, CA, USA", "Guelph, NC, USA", "Guelph, NH, USA"])).toBeNull();

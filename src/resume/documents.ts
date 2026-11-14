@@ -20,7 +20,7 @@ const fileName = (profile: Profile, what: string) => {
 };
 export const resumeName = (profile: Profile) => fileName(profile, "Resume");
 export const coverLetterName = (profile: Profile) => fileName(profile, "Cover_Letter");
-/** The name a file shows on the application: Yray_Akemu_<Company>_<Role>_Resume.pdf. */
+/** The name a file shows on the application: First_Last_<Company>_<Role>_Resume.pdf. */
 export const uploadName = (profile: Profile, job: { company: string; title: string }, what: "Resume" | "Cover_Letter") => {
   const who = [profile.contact.firstName, profile.contact.lastName].filter(Boolean).join("_") || "My";
   const part = (t: string) => t.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 50);
